@@ -1,0 +1,73 @@
+# Build the `vxsdk` PyPI package from this directory.
+#
+#   python -m build         # produces dist/vxsdk-<version>-py3-none-any.whl + .tar.gz
+#   twine upload dist/*     # publishes to PyPI (or TestPyPI with --repository testpypi)
+#
+# The package ships two top-level modules: vxsdk (sync, stdlib-only) and
+# vxsdk_async (async, requires httpx). Async is opt-in via:
+#
+#   pip install vxsdk[async]
+#
+# This avoids forcing httpx onto users who only need the sync client.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vxsdk"
+version = "0.1.0"
+description = "Python SDK for the vxcloud / VxCloud platform — provision infrastructure, deploy applications, and manage running services from your terminal or CI pipeline."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "vxcloud", email = "engineering@vxcloud.io" },
+]
+keywords = [
+    "vxcloud", "vxcloud", "vxcli", "infrastructure", "iac",
+    "deploy", "ssh", "docker", "kubernetes", "ai-agents",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+    "Topic :: System :: Installation/Setup",
+]
+dependencies = []  # sync flavor is stdlib-only by design
+
+[project.optional-dependencies]
+async = ["httpx>=0.25"]
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.25",
+    "build>=1.0",
+    "twine>=4.0",
+]
+
+[project.urls]
+Homepage      = "https://vxcloud.io"
+Documentation = "https://vxcloud.io/docs/sdks"
+Repository    = "https://github.com/prodxcloud/vxcloud"
+Issues        = "https://github.com/prodxcloud/vxcloud/issues"
+Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/python/CHANGELOG.md"
+
+# We ship two stand-alone modules (vxsdk.py, vxsdk_async.py) rather than
+# a package with __init__.py — keeps the "drop a single file into your
+# tree" use case alive and matches what the README has documented since
+# preview. py-modules is the explicit setuptools way to declare them.
+[tool.setuptools]
+py-modules = ["vxsdk", "vxsdk_async"]
+
+[tool.setuptools.package-data]
+"*" = ["README.md", "CHANGELOG.md"]

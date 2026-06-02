@@ -1,0 +1,77 @@
+# Build the `vxcloud` PyPI shim package from this directory.
+#
+#   python -m build         # produces dist/vxcloud-<version>-py3-none-any.whl + .tar.gz
+#   twine upload dist/*     # publishes to PyPI
+#
+# This package is a THIN ALIAS over `vxsdk` — it does nothing on its own
+# beyond re-exporting every public name. Released so users who reach for
+# the brand name (`pip install vxcloud`, `import vxcloud`) land on the same
+# implementation as `vxsdk`. The async flavor is opt-in via:
+#
+#   pip install vxcloud[async]
+#
+# Versioning policy: keep this package's version in lock-step with the
+# `vxsdk` version it pins. Each release of vxcloud should pin the matching
+# vxsdk release exactly so users get a deterministic surface.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vxcloud"
+version = "0.1.0"
+description = "Brand-name alias for the `vxsdk` Python SDK — `import vxcloud` is identical to `import vxsdk`."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "vxcloud", email = "engineering@vxcloud.io" },
+]
+keywords = [
+    "vxcloud", "vxsdk", "vxcli", "infrastructure", "iac",
+    "deploy", "ssh", "docker", "kubernetes", "ai-agents",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+]
+# Pin the matching vxsdk so vxcloud's surface is deterministic at install time.
+dependencies = ["vxsdk==0.1.0"]
+
+[project.optional-dependencies]
+# Mirror vxsdk's extras so `pip install vxcloud[async]` works the same way
+# as `pip install vxsdk[async]`.
+async = ["vxsdk[async]==0.1.0", "httpx>=0.25"]
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.25",
+    "build>=1.0",
+    "twine>=4.0",
+]
+
+[project.urls]
+Homepage      = "https://vxcloud.io"
+Documentation = "https://vxcloud.io/docs/sdks"
+Repository    = "https://github.com/prodxcloud/vxcloud"
+Issues        = "https://github.com/prodxcloud/vxcloud/issues"
+Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/python-vxcloud/CHANGELOG.md"
+
+# Two stand-alone shim modules so `import vxcloud` and `import vxcloud_async`
+# both work and forward straight to vxsdk / vxsdk_async respectively.
+[tool.setuptools]
+py-modules = ["vxcloud", "vxcloud_async"]
+
+[tool.setuptools.package-data]
+"*" = ["README.md", "CHANGELOG.md"]
