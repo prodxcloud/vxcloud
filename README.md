@@ -1,14 +1,26 @@
-# vxcloud SDK — Go · Python · TypeScript
+<div align="center">
 
-Official SDKs for the **vxcloud** platform. One wire contract, three first-class
-languages. Provision multi-cloud infrastructure, deploy apps, run AI agents, and
+# 📦 vxcloud SDK
+
+### Go · Python · TypeScript — one wire contract, three first-class SDKs
+
+Provision multi-cloud infrastructure, deploy apps, run governed AI agents, and
 drive the node control plane — from your code or CI.
 
-| Language | Install | Package |
+[![npm](https://img.shields.io/npm/v/%40vxcloud%2Fsdk?logo=npm&label=%40vxcloud%2Fsdk&color=CB3837)](https://www.npmjs.com/package/@vxcloud/sdk)
+[![PyPI](https://img.shields.io/pypi/v/vxsdk?logo=pypi&logoColor=white&label=vxsdk&color=3776AB)](https://pypi.org/project/vxsdk/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/prodxcloud/vxcloud.svg)](https://pkg.go.dev/github.com/prodxcloud/vxcloud)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+
+[🌐 Website](https://vxcloud.io) · [📚 Docs](https://vxcloud.io/docs/sdks) · [💻 CLI](https://vxcloud.io/download/cli) · [🐳 vxnode image](https://hub.docker.com/r/vxcloud/vxnode) · [⚙️ node tooling](https://github.com/prodxcloud/vxnode)
+
+</div>
+
+| Language | Install | Registry |
 |---|---|---|
-| **TypeScript / Node** | `npm install @vxcloud/sdk` | [npmjs.com/package/@vxcloud/sdk](https://www.npmjs.com/package/@vxcloud/sdk) |
-| **Python** | `pip install vxsdk` &nbsp;·&nbsp; `pip install vxcloud` | [pypi.org/project/vxsdk](https://pypi.org/project/vxsdk/) · [vxcloud](https://pypi.org/project/vxcloud/) |
-| **Go** | `go get github.com/prodxcloud/vxcloud` | [pkg.go.dev/github.com/prodxcloud/vxcloud](https://pkg.go.dev/github.com/prodxcloud/vxcloud) |
+| **TypeScript / Node** | `npm install @vxcloud/sdk` | [![npm](https://img.shields.io/npm/v/%40vxcloud%2Fsdk?label=version&color=CB3837)](https://www.npmjs.com/package/@vxcloud/sdk) |
+| **Python** | `pip install vxsdk` &nbsp;·&nbsp; `pip install vxcloud` | [![PyPI](https://img.shields.io/pypi/v/vxsdk?label=version&color=3776AB)](https://pypi.org/project/vxsdk/) · [vxcloud](https://pypi.org/project/vxcloud/) |
+| **Go** | `go get github.com/prodxcloud/vxcloud` | [pkg.go.dev](https://pkg.go.dev/github.com/prodxcloud/vxcloud) |
 
 > `vxcloud` (PyPI) is a brand alias that re-exports `vxsdk` — `import vxcloud` ≡ `import vxsdk`.
 > Source: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud) · Docs: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
