@@ -122,7 +122,7 @@ PARITY.md `### workspace` table updated — total method count rose from Go 27 /
   surfaces planned (in flight; pending the live endpoints).
 
 ### Changed
-- Module path documented as `github.com/prodxcloud/vxcloud`. Pre-tag
+- Module path documented as `github.com/vxcloud/vxsdk-go`. Pre-tag
   releases use `replace` directives in `examples/*/go.mod`.
 
 ## [0.1.0-preview] — 2026-04-29

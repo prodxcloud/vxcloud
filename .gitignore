@@ -1,12 +1,10 @@
-# dependencies & build output
+# deps & build output
 node_modules/
 dist/
 build/
 *.egg-info/
 __pycache__/
 .pytest_cache/
-
-# python distributions
 *.whl
 *.tar.gz
 
@@ -16,6 +14,14 @@ examples/*/vxsdkinstallexample
 examples/*/vxsdkmarketplaceexample
 examples/**/*.exe
 
-# local env
+# internal-only — never publish
+BIG_PLAN.md
+BIG_PLAN_AGENTCONTROL.md
+PARITY.md
+
+# not for the public SDK repo
+.github/
+.vscode/
+.gemini/
 .env
 .DS_Store

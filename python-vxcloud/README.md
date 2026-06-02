@@ -29,4 +29,4 @@ name you and your team prefer.
 
 The `vxcloud` release version is pinned to the matching `vxsdk` release; see
 [CHANGELOG.md](./CHANGELOG.md). For the full SDK reference, see the upstream
-[`vxsdk` README](https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/python/README.md).
+[`vxsdk` README](https://github.com/vxcloud/platform/blob/main/services/sdk/python/README.md).
