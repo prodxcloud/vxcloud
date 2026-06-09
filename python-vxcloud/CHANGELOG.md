@@ -1,7 +1,15 @@
 # vxcloud Python — Changelog
 
 All `vxcloud` releases are thin shims over `vxsdk`. Each version pins the
-matching `vxsdk` release exactly.
+matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
+stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
+0.1.x preview line predates this switch.
+
+## 2026.6.10
+
+- Adopt CalVer (`YYYY.M.D`) — version now matches the vxnode fleet release
+  date, in lock-step with `vxsdk 2026.6.10`.
+- Re-pinned to `vxsdk==2026.6.10` (base + `[async]` extra).
 
 ## 0.1.1
 

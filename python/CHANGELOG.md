@@ -1,10 +1,16 @@
 # vxsdk (Python) — Changelog
 
 All notable changes to the Python SDK. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-The project follows [Semantic Versioning](https://semver.org/) — pre-1.0
-releases may break public API in any minor bump.
+Versioning is **CalVer** (`YYYY.M.D`) to stay aligned with the vxnode fleet
+release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
+
+## [2026.6.10]
+
+Adopt CalVer (`YYYY.M.D`) — the package version now tracks the vxnode fleet
+release date so SDK, binary, and dashboard all read the same number. Bundles
+the M1–M4 resource classes listed below (no breaking changes vs. 0.1.0).
 
 ### Added — M3 + M4 (six new resource classes)
 - `vxsdk.Networks` — diagnostic-script catalog + remote run.

@@ -42,7 +42,7 @@ import { Workflow } from './workflow.js';
 import { Workspace } from './workspace.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '2026.6.10';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */

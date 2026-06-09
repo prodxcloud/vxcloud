@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vxcloud"
-version = "0.1.1"
+version = "2026.6.10"
 description = "Official Python SDK for the vxcloud platform — provision infrastructure, deploy apps, and manage running services from Python or CI. Brand alias of vxsdk."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -47,12 +47,12 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 # Pin the matching vxsdk so vxcloud's surface is deterministic at install time.
-dependencies = ["vxsdk==0.1.0"]
+dependencies = ["vxsdk==2026.6.10"]
 
 [project.optional-dependencies]
 # Mirror vxsdk's extras so `pip install vxcloud[async]` works the same way
 # as `pip install vxsdk[async]`.
-async = ["vxsdk[async]==0.1.0", "httpx>=0.25"]
+async = ["vxsdk[async]==2026.6.10", "httpx>=0.25"]
 dev = [
     "pytest>=7",
     "pytest-asyncio>=0.21",

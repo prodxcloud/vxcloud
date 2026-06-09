@@ -5,6 +5,12 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.6.10]
+
+- Adopt CalVer (`YYYY.M.D`) — the package version now tracks the vxnode fleet
+  release date (e.g. `v2026.6.10-1`) so the SDK, binary, and dashboard all
+  read the same number. No API changes vs. 0.1.1.
+
 ## [0.1.1]
 
 ### Added — M3 + M4

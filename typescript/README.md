@@ -12,7 +12,7 @@ The official TypeScript SDK for the vxcloud / VxCloud platform. Fully typed, dua
 
 [Install](#install) · [Quick start](#quick-start) · [What you can do](#what-you-can-do) · [Auth](#authentication) · [Errors](#error-handling) · [Docs](https://vxcloud.io/docs/sdks)
 
-> **Status: 0.1 — preview.** Pre-1.0 minor bumps (`0.X` → `0.X+1`) may change public surface. Pin tightly until 1.0.
+> **Versioning: CalVer (`YYYY.M.D`)** — releases track the vxnode fleet date (e.g. `v2026.6.10-1`), so the SDK, the node binary, and the dashboard all read the same number. Still a preview surface; pin exact versions in production.
 
 ---
 
