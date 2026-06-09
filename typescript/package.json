@@ -1,6 +1,6 @@
 {
   "name": "@vxcloud/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK for the vxcloud / VxCloud platform — provision infrastructure, deploy applications, and manage running services from your terminal or CI pipeline.",
   "license": "Apache-2.0",
   "author": "vxcloud <engineering@vxcloud.io>",

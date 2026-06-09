@@ -20,8 +20,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vxcloud"
-version = "0.1.0"
-description = "Brand-name alias for the `vxsdk` Python SDK — `import vxcloud` is identical to `import vxsdk`."
+version = "0.1.1"
+description = "Official Python SDK for the vxcloud platform — provision infrastructure, deploy apps, and manage running services from Python or CI. Brand alias of vxsdk."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }

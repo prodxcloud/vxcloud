@@ -117,7 +117,7 @@ Two interchangeable credentials, identical across all three SDKs:
 
 - **API key** — `xc_live_*`, `xc_dev_*`, or `xc_test_*`. The SDK exchanges it for a
   JWT on first call and auto-refreshes on 401. Generate one at
-  [app.vxcloud.io/developer/keys](https://app.vxcloud.io/developer/keys).
+  [vxcloud.io/developer/keys](https://vxcloud.io/developer/keys).
 - **vxcli credentials** — `load_from_vxcli()` / `LoadFromVxcli()` reads
   `~/.vxcloud/credentials.json`, so anyone already signed in via `vxcli` is ready.
 

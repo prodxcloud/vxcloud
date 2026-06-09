@@ -5,6 +5,8 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [0.1.1]
+
 ### Added — M3 + M4
 - `client.networks` — script catalog + remote-execute.
 - `client.agents` — `coding / devops / git / parallel / run / presets / tools / tool`.
@@ -15,6 +17,11 @@ Pre-1.0 releases may break public API in any minor bump.
 - `client.workspace` — full `/api/v2/setup/*` (workspace + organization
   lifecycle, cloud-provider creds, AI-provider creds, API tokens,
   Git/payment/SMTP/SSL/OAuth/OKTA/CyberArk credentials).
+
+### Docs
+- Rewrote the npm README: badges, tagline, nav, full 21-module capability
+  table (now documents `agents`, `billing`, `chat`, `networks`,
+  `observability`, `workspace`), cross-language SDK matrix.
 
 ## [0.1.0] — 2026-04-30
 
