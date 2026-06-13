@@ -17,6 +17,10 @@
  *   POST   /api/v2/robotic/robots/{id}/plan
  *   POST   /api/v2/robotic/robots/{id}/schedule
  *   POST   /api/v2/robotic/robots/{id}/approval/resolve
+ *   GET    /api/v2/robotic/templates
+ *   GET    /api/v2/robotic/robots/{id}/state
+ *   POST   /api/v2/robotic/robots/{id}/simulate
+ *   POST   /api/v2/robotic/robots/{id}/kinematics
  *   POST   /api/v2/robotic/fleet/command
  *   POST   /api/v2/robotic/fleet/mission
  */
@@ -96,6 +100,35 @@ export class Robotic {
   async resolveApproval(robotId: string, payload: Record<string, unknown>): Promise<Result> {
     if (!robotId) throw new Error('robotic.resolveApproval: robotId is required');
     return (await this.t.postJSON<Result>(`/api/v2/robotic/robots/${robotId}/approval/resolve`, payload)).body ?? {};
+  }
+
+  /** List the built-in robot archetypes (arm, mobile, humanoid, drone, computer)
+   *  with their kinematic params + default capabilities — use one as a blueprint
+   *  when registering a robot. */
+  async templates(): Promise<Result> {
+    return (await this.t.get<Result>('/api/v2/robotic/templates')).body ?? {};
+  }
+
+  /** Live offline-physics state of a robot — pose, joints, battery, balance —
+   *  for virtual robots, or device telemetry for real ones. */
+  async state(robotId: string): Promise<Result> {
+    if (!robotId) throw new Error('robotic.state: robotId is required');
+    return (await this.t.get<Result>(`/api/v2/robotic/robots/${robotId}/state`)).body ?? {};
+  }
+
+  /** DRY-RUN a motion through the physics engine and return the predicted
+   *  trajectory. Changes no state and dispatches no command.
+   *  payload: {action, parameters, samples, type}. */
+  async simulate(robotId: string, payload: Record<string, unknown>): Promise<Result> {
+    if (!robotId) throw new Error('robotic.simulate: robotId is required');
+    return (await this.t.postJSON<Result>(`/api/v2/robotic/robots/${robotId}/simulate`, payload)).body ?? {};
+  }
+
+  /** Forward (op=fk, needs joints) or inverse (op=ik, needs x,y) kinematics for a
+   *  2-link planar arm. payload: {op, joints|x,y, link1_m, link2_m, elbow_up}. */
+  async kinematics(robotId: string, payload: Record<string, unknown>): Promise<Result> {
+    if (!robotId) throw new Error('robotic.kinematics: robotId is required');
+    return (await this.t.postJSON<Result>(`/api/v2/robotic/robots/${robotId}/kinematics`, payload)).body ?? {};
   }
 
   /** Issue a command to every robot in the fleet. */

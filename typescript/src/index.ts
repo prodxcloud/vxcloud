@@ -77,5 +77,18 @@ export {
   type VxComputerRunInput, type VxComputerApprovalInput,
 } from './vxcomputer.js';
 export { Robotic } from './robotic.js';
+export {
+  Connector,
+  type ConnectorVMInput, type ConnectorDeployVMInput, type ConnectorBucketInput,
+  type ConnectorStaticSiteInput, type ConnectorCloudRunInput,
+  type ConnectorSubdomainInput, type ConnectorLBInput,
+} from './connector.js';
+export {
+  WebScraper, type ScrapeInput, type SearchInput, type DeepResearchInput,
+} from './webscraper.js';
+export {
+  AgentCLI, resolveAgent, type Agent,
+  type AgentInstallOpts, type AgentConfigureOpts,
+} from './agentcli.js';
 export { VxChrono } from './vxchrono.js';
 export { Workflow } from './workflow.js';

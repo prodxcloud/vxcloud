@@ -40,9 +40,12 @@ import { VxChrono } from './vxchrono.js';
 import { VxComputer } from './vxcomputer.js';
 import { Workflow } from './workflow.js';
 import { Workspace } from './workspace.js';
+import { Connector } from './connector.js';
+import { WebScraper } from './webscraper.js';
+import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.6.10';
+export const VERSION = '2026.6.15';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */
@@ -92,6 +95,9 @@ export class VxCloud {
   readonly vxcomputer: VxComputer;
   readonly workflow: Workflow;
   readonly workspace: Workspace;
+  readonly connector: Connector;
+  readonly webscraper: WebScraper;
+  readonly agentcli: AgentCLI;
 
   /** Default workspace tenant ID surfaced to resources that need it (agentcontrol). */
   readonly tenantId: string;
@@ -143,6 +149,9 @@ export class VxCloud {
     this.vxcomputer = new VxComputer(this.t);
     this.workflow = new Workflow(this.t);
     this.workspace = new Workspace(this.t);
+    this.connector = new Connector(this.t, () => this.username);
+    this.webscraper = new WebScraper(this.t);
+    this.agentcli = new AgentCLI(this.t, () => this.username);
   }
 
   /**
