@@ -15,6 +15,10 @@
 //	POST   /api/v2/robotic/robots/{id}/telemetry
 //	POST   /api/v2/robotic/robots/{id}/plan
 //	POST   /api/v2/robotic/robots/{id}/approval/resolve
+//	GET    /api/v2/robotic/robots/{id}/state
+//	POST   /api/v2/robotic/robots/{id}/simulate
+//	POST   /api/v2/robotic/robots/{id}/kinematics
+//	GET    /api/v2/robotic/templates
 //	POST   /api/v2/robotic/fleet/command
 package robotic
 
@@ -137,6 +141,44 @@ func (c *Client) Schedule(ctx context.Context, robotID string, payload map[strin
 	}
 	return c.do(ctx, "robotic.Schedule", "POST",
 		"/api/v2/robotic/robots/"+robotID+"/schedule", payload)
+}
+
+// Templates lists the built-in robot archetypes (arm, mobile, humanoid, drone,
+// computer) with their kinematic params + default capabilities. Use one as a
+// blueprint when registering a robot.
+func (c *Client) Templates(ctx context.Context) (Result, error) {
+	return c.do(ctx, "robotic.Templates", "GET", "/api/v2/robotic/templates", nil)
+}
+
+// State returns the live offline-physics state of a robot — pose, joints,
+// battery, balance — for virtual robots, or device telemetry for real ones.
+func (c *Client) State(ctx context.Context, robotID string) (Result, error) {
+	if robotID == "" {
+		return nil, errors.New("robotic.State: robotID is required")
+	}
+	return c.do(ctx, "robotic.State", "GET", "/api/v2/robotic/robots/"+robotID+"/state", nil)
+}
+
+// Simulate DRY-RUNS a motion through the physics engine and returns the
+// predicted trajectory. It changes no state and dispatches no command (so it
+// bypasses no approval policy). payload: {action, parameters, samples, type}.
+func (c *Client) Simulate(ctx context.Context, robotID string, payload map[string]interface{}) (Result, error) {
+	if robotID == "" {
+		return nil, errors.New("robotic.Simulate: robotID is required")
+	}
+	return c.do(ctx, "robotic.Simulate", "POST",
+		"/api/v2/robotic/robots/"+robotID+"/simulate", payload)
+}
+
+// Kinematics computes forward (op=fk, needs joints) or inverse (op=ik, needs
+// x,y) kinematics for a 2-link planar arm. payload: {op, joints|x,y, link1_m,
+// link2_m, elbow_up}.
+func (c *Client) Kinematics(ctx context.Context, robotID string, payload map[string]interface{}) (Result, error) {
+	if robotID == "" {
+		return nil, errors.New("robotic.Kinematics: robotID is required")
+	}
+	return c.do(ctx, "robotic.Kinematics", "POST",
+		"/api/v2/robotic/robots/"+robotID+"/kinematics", payload)
 }
 
 // FleetCommand issues a command to every robot in the fleet.

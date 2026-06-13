@@ -723,6 +723,158 @@ class Deploy(_Resource):
         )
 
 
+# ── AI agent CLIs (install/configure/health/test over SSH) ──────────────
+
+class AgentCLI(_Resource):
+    """Install and manage AI agent CLIs on a remote VM over SSH.
+
+    Mirrors services/agentcli + services/openclaw. Each call SSHes into the
+    target host (the node resolves ``key_pair_name`` from the workspace vault)
+    and runs the install/configure/health/test action there.
+
+    Supported agents (friendly name -> resource):
+        claude|claude-code -> claudecode
+        codex              -> codex
+        gemini             -> gemini
+        hermes|hermesagent -> hermesagent
+        openclaw           -> openclaw
+    """
+
+    _AGENTS = {
+        "claude": "claudecode", "claudecode": "claudecode", "claude-code": "claudecode",
+        "codex": "codex", "openai-codex": "codex",
+        "gemini": "gemini", "google-gemini": "gemini",
+        "hermes": "hermesagent", "hermesagent": "hermesagent", "hermes-agent": "hermesagent",
+        "openclaw": "openclaw",
+    }
+
+    def _resolve(self, agent: str) -> str:
+        key = (agent or "").strip().lower()
+        if key not in self._AGENTS:
+            raise ValueError(
+                f"unknown agent {agent!r}; choose from claude, codex, gemini, hermes, openclaw")
+        return self._AGENTS[key]
+
+    def _post(self, agent: str, action: str, fields: dict[str, str], *, op: str,
+              timeout: int) -> dict[str, Any]:
+        self.client.ensure_node_url()
+        res = self._resolve(agent)
+        url = self.client.node_url + f"/api/v2/infrastructure/services/{res}/{action}"
+        return self.client._multipart(url, fields, [], op=op, timeout=timeout)
+
+    def install(self, agent: str, host: str, ssh_user: str, key_pair_name: str, *,
+                install_method: str | None = None, node_version: str | None = None,
+                skip_docker: bool = False, skip_cleanup: bool = False,
+                domain: str | None = None, ssl_email: str | None = None,
+                workspace_user: str | None = None, organization: str | None = None,
+                timeout: int = DEFAULT_LONG_TIMEOUT) -> dict[str, Any]:
+        fields = self.client._ssh_fields(host, ssh_user, key_pair_name, workspace_user, organization)
+        if install_method:
+            fields["install_method"] = install_method
+        if node_version:
+            fields["node_version"] = node_version
+        if skip_docker:
+            fields["skip_docker"] = "true"
+        if skip_cleanup:
+            fields["skip_cleanup"] = "true"
+        if domain:
+            fields["domain"] = domain
+            if ssl_email:
+                fields["ssl_email"] = ssl_email
+        return self._post(agent, "install", fields, op="agentcli.install", timeout=timeout)
+
+    def configure(self, agent: str, host: str, ssh_user: str, key_pair_name: str, *,
+                  anthropic_key: str | None = None, openai_key: str | None = None,
+                  gemini_key: str | None = None, model: str | None = None,
+                  gateway_port: str | None = None, start_gateway: bool = False,
+                  workspace_user: str | None = None, organization: str | None = None,
+                  timeout: int = DEFAULT_LONG_TIMEOUT) -> dict[str, Any]:
+        fields = self.client._ssh_fields(host, ssh_user, key_pair_name, workspace_user, organization)
+        for k, v in {
+            "anthropic_key": anthropic_key, "openai_key": openai_key,
+            "gemini_key": gemini_key, "model": model, "gateway_port": gateway_port,
+        }.items():
+            if v:
+                fields[k] = v
+        if start_gateway:
+            fields["start_gateway"] = "true"
+        return self._post(agent, "configure", fields, op="agentcli.configure", timeout=timeout)
+
+    def health(self, agent: str, host: str, ssh_user: str, key_pair_name: str, *,
+               action: str = "status", lines: int = 50,
+               workspace_user: str | None = None, organization: str | None = None,
+               timeout: int = 300) -> dict[str, Any]:
+        fields = self.client._ssh_fields(host, ssh_user, key_pair_name, workspace_user, organization)
+        if action:
+            fields["action"] = action
+        if lines:
+            fields["log_lines"] = str(lines)
+        return self._post(agent, "health", fields, op="agentcli.health", timeout=timeout)
+
+    def test_connection(self, agent: str, host: str, ssh_user: str, key_pair_name: str, *,
+                        workspace_user: str | None = None, organization: str | None = None,
+                        timeout: int = 60) -> dict[str, Any]:
+        fields = self.client._ssh_fields(host, ssh_user, key_pair_name, workspace_user, organization)
+        return self._post(agent, "test-connection", fields, op="agentcli.test_connection", timeout=timeout)
+
+
+# ── Web research agent (crawl / search / deep-research) ─────────────────
+
+class WebScraper(_Resource):
+    """Goroutine-driven web research agent.
+
+    Mirrors /api/v2/tenant/agents/webscraper/*. ``scrape`` (BFS crawl) and
+    ``search`` (multi-engine) are NOT AI. ``deep_research`` uses the caller's
+    LLM provider, or runs fully offline/extractive when ``provider="none"``.
+    """
+
+    _BASE = "/api/v2/tenant/agents/webscraper"
+
+    def scrape(self, urls: str | list[str], *, max_depth: int = 1, max_pages: int = 20,
+               same_host: bool = False, include_links: bool = False,
+               concurrency: int = 0, max_chars: int = 0,
+               timeout: int = 300) -> dict[str, Any]:
+        """Concurrent BFS crawl — returns extracted pages (title/text/summary/links)."""
+        if isinstance(urls, str):
+            urls = [urls]
+        if not urls:
+            raise ValueError("webscraper.scrape: provide at least one URL")
+        self.client.ensure_node_url()
+        body = {
+            "urls": urls, "max_depth": max_depth, "max_pages": max_pages,
+            "same_host": same_host, "include_links": include_links,
+            "concurrency": concurrency, "max_chars": max_chars,
+        }
+        return self.client._json("POST", self.client.node_url + self._BASE + "/scrape",
+                                 op="webscraper.scrape", json_body=body, timeout=timeout)
+
+    def search(self, query: str, *, limit: int = 10, engines: list[str] | None = None,
+               timeout: int = 120) -> dict[str, Any]:
+        """Multi-engine web search (DDG Lite/HTML + Bing, with JSON-API/Google
+        fallback). Merged, deduped, ranked by cross-engine agreement."""
+        if not query:
+            raise ValueError("webscraper.search: query is required")
+        self.client.ensure_node_url()
+        body = {"query": query, "limit": limit, "engines": engines or []}
+        return self.client._json("POST", self.client.node_url + self._BASE + "/search",
+                                 op="webscraper.search", json_body=body, timeout=timeout)
+
+    def deep_research(self, query: str, *, provider: str = "", model: str = "",
+                      max_rounds: int = 3, breadth: int = 4, top_k: int = 4,
+                      max_chars: int = 6000, timeout: int = DEFAULT_LONG_TIMEOUT) -> dict[str, Any]:
+        """Multi-round deep search + cited markdown report. provider='none' →
+        offline extractive (no LLM)."""
+        if not query:
+            raise ValueError("webscraper.deep_research: query is required")
+        self.client.ensure_node_url()
+        body = {
+            "query": query, "provider": provider, "model": model,
+            "max_rounds": max_rounds, "breadth": breadth, "top_k": top_k, "max_chars": max_chars,
+        }
+        return self.client._json("POST", self.client.node_url + self._BASE + "/deep-research",
+                                 op="webscraper.deep_research", json_body=body, timeout=timeout)
+
+
 # ── Marketplace ────────────────────────────────────────────────────────
 
 class _MarketplaceList(_Resource):
@@ -1167,6 +1319,132 @@ class Cloud(_Resource):
             app=name, cloud=cloud, region=region, resource_type="lambda",
             **extras,
         )
+
+
+# ── Connector (SDK-direct cloud deploys, no Terraform) ─────────────────────
+
+class Connector(_Resource):
+    """SDK-direct cloud deploys via /api/v2/connector/*.
+
+    Unlike ``Cloud`` (which provisions through server-side Terraform under
+    /api/v2/tenant/provision/*), the connector surface provisions by calling
+    cloud-provider SDKs and REST APIs directly — no Terraform, no state files.
+    Covers EC2 VMs, S3 static sites, GCP Cloud Run, Route53 records, and ALBs.
+
+    Every request carries ``username`` for the node's Vault-backed credential
+    lookup; it defaults to the client's authenticated username.
+    """
+
+    def _post(self, op: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.client.ensure_node_url()
+        body.setdefault("username", self.client.username)
+        if self.client.organization:
+            body.setdefault("organization", self.client.organization)
+        return self.client._json(
+            "POST", self.client.node_url + path, op=op, json_body=body,
+            timeout=DEFAULT_LONG_TIMEOUT,
+        )
+
+    @staticmethod
+    def _compact(body: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in body.items() if v not in (None, "", [], {})}
+
+    def provision_vm(self, instance_name: str, *, instance_type: str = "",
+                     region: str = "", os: str = "", volume_size: int = 0,
+                     key_pair_name: str = "", tags: dict[str, str] | None = None,
+                     session_id: str = "") -> dict[str, Any]:
+        """Launch a single EC2 instance. POST /api/v2/connector/vm/provision."""
+        return self._post("connector.provision_vm", "/api/v2/connector/vm/provision",
+                          self._compact({
+                              "instance_name": instance_name, "instance_type": instance_type,
+                              "region": region, "os": os, "volume_size": volume_size,
+                              "key_pair_name": key_pair_name, "tags": tags,
+                              "session_id": session_id,
+                          }))
+
+    def terminate_vm(self, instance_id: str) -> dict[str, Any]:
+        """Terminate an EC2 instance. POST /api/v2/connector/vm/terminate."""
+        return self._post("connector.terminate_vm", "/api/v2/connector/vm/terminate",
+                          {"instance_id": instance_id})
+
+    def deploy_to_vm(self, session_id: str, *, storage_path: str = "",
+                     instance_name: str = "", instance_type: str = "", region: str = "",
+                     os: str = "", volume_size: int = 0, key_pair_name: str = "",
+                     subdomain: str = "", deploy_command: str = "",
+                     tags: dict[str, str] | None = None) -> dict[str, Any]:
+        """Provision an EC2 instance and push a studio project to it over SFTP.
+        POST /api/v2/connector/vm/studio/deploy."""
+        return self._post("connector.deploy_to_vm", "/api/v2/connector/vm/studio/deploy",
+                          self._compact({
+                              "session_id": session_id, "storage_path": storage_path,
+                              "instance_name": instance_name, "instance_type": instance_type,
+                              "region": region, "os": os, "volume_size": volume_size,
+                              "key_pair_name": key_pair_name, "subdomain": subdomain,
+                              "deploy_command": deploy_command, "tags": tags,
+                          }))
+
+    def create_bucket(self, bucket_name: str, *, region: str = "",
+                      public: bool = False) -> dict[str, Any]:
+        """Create a single S3 bucket. POST /api/v2/connector/s3/bucket."""
+        return self._post("connector.create_bucket", "/api/v2/connector/s3/bucket",
+                          self._compact({
+                              "bucket_name": bucket_name, "region": region, "public": public,
+                          }))
+
+    def deploy_static_site(self, session_id: str, *, storage_path: str = "",
+                           bucket_name: str = "", region: str = "",
+                           index_document: str = "", error_document: str = "",
+                           subdomain: str = "", custom_domain: str = "") -> dict[str, Any]:
+        """Deploy a studio project to S3 as a static website.
+        POST /api/v2/connector/s3/studio/deploy."""
+        return self._post("connector.deploy_static_site", "/api/v2/connector/s3/studio/deploy",
+                          self._compact({
+                              "session_id": session_id, "storage_path": storage_path,
+                              "bucket_name": bucket_name, "region": region,
+                              "index_document": index_document, "error_document": error_document,
+                              "subdomain": subdomain, "custom_domain": custom_domain,
+                          }))
+
+    def deploy_cloud_run(self, service_name: str, image: str, *, region: str = "",
+                         port: int = 0, env_vars: dict[str, str] | None = None,
+                         memory: str = "", cpu: str = "", max_instances: int = 0,
+                         subdomain: str = "", allow_public: bool = False,
+                         session_id: str = "") -> dict[str, Any]:
+        """Deploy a container image to Google Cloud Run.
+        POST /api/v2/connector/gcr/studio/deploy."""
+        return self._post("connector.deploy_cloud_run", "/api/v2/connector/gcr/studio/deploy",
+                          self._compact({
+                              "service_name": service_name, "image": image, "region": region,
+                              "port": port, "env_vars": env_vars, "memory": memory, "cpu": cpu,
+                              "max_instances": max_instances, "subdomain": subdomain,
+                              "allow_public": allow_public, "session_id": session_id,
+                          }))
+
+    def create_subdomain(self, subdomain: str, *, base_domain: str = "",
+                         hosted_zone_id: str = "", target_ip: str = "",
+                         target_cname: str = "", record_type: str = "",
+                         ttl: int = 0) -> dict[str, Any]:
+        """Create a Route53 DNS record. POST /api/v2/connector/dns/subdomain."""
+        return self._post("connector.create_subdomain", "/api/v2/connector/dns/subdomain",
+                          self._compact({
+                              "subdomain": subdomain, "base_domain": base_domain,
+                              "hosted_zone_id": hosted_zone_id, "target_ip": target_ip,
+                              "target_cname": target_cname, "record_type": record_type,
+                              "ttl": ttl,
+                          }))
+
+    def attach_load_balancer(self, name: str, instance_ids: list[str], *,
+                             port: int = 0, health_path: str = "", region: str = "",
+                             subdomain: str = "", vpc_id: str = "",
+                             subnet_ids: list[str] | None = None) -> dict[str, Any]:
+        """Create an ALB + target group and register instances.
+        POST /api/v2/connector/lb/attach."""
+        return self._post("connector.attach_load_balancer", "/api/v2/connector/lb/attach",
+                          self._compact({
+                              "name": name, "instance_ids": instance_ids, "port": port,
+                              "health_path": health_path, "region": region,
+                              "subdomain": subdomain, "vpc_id": vpc_id, "subnet_ids": subnet_ids,
+                          }))
 
 
 # ── Metal DB (PostgreSQL on a VM) ──────────────────────────────────────
@@ -3268,6 +3546,32 @@ class Robotic(_Resource):
             "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/schedule",
             op="robotic.schedule", json_body=payload)
 
+    def templates(self) -> dict[str, Any]:
+        """List built-in robot archetypes (arm, mobile, humanoid, drone, computer)."""
+        return self.client._json(
+            "GET", self.client.node_url + "/api/v2/robotic/templates",
+            op="robotic.templates")
+
+    def state(self, robot_id: str) -> dict[str, Any]:
+        """Live offline-physics state (pose, joints, battery, balance) for a robot."""
+        return self.client._json(
+            "GET", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/state",
+            op="robotic.state")
+
+    def simulate(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """DRY-RUN a motion through the physics engine; returns the predicted
+        trajectory and changes no state (payload: action, parameters, samples, type)."""
+        return self.client._json(
+            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/simulate",
+            op="robotic.simulate", json_body=payload)
+
+    def kinematics(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Forward (op=fk) or inverse (op=ik) kinematics for a 2-link arm
+        (payload: op, joints|x,y, link1_m, link2_m, elbow_up)."""
+        return self.client._json(
+            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/kinematics",
+            op="robotic.kinematics", json_body=payload)
+
     def fleet_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.client._json(
             "POST", self.client.node_url + "/api/v2/robotic/fleet/command",
@@ -3519,9 +3823,12 @@ class Client:
         self.cicd = CICD(self)
         self.sessions = Sessions(self)
         self.install = Install(self)
+        self.agentcli = AgentCLI(self)
+        self.webscraper = WebScraper(self)
         self.deploy = Deploy(self)
         self.marketplace = Marketplace(self)
         self.cloud = Cloud(self)
+        self.connector = Connector(self)
         self.metaldb = MetalDB(self)
         self.nodes = Nodes(self)
         self.services = Services(self)

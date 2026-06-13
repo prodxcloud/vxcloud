@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prodxcloud/vxcloud/agentcli"
 	"github.com/prodxcloud/vxcloud/agentcontrol"
 	"github.com/prodxcloud/vxcloud/agents"
 	"github.com/prodxcloud/vxcloud/auth"
@@ -13,6 +14,7 @@ import (
 	"github.com/prodxcloud/vxcloud/chat"
 	"github.com/prodxcloud/vxcloud/cicd"
 	"github.com/prodxcloud/vxcloud/cloud"
+	"github.com/prodxcloud/vxcloud/connector"
 	"github.com/prodxcloud/vxcloud/deploy"
 	vxerrors "github.com/prodxcloud/vxcloud/errors"
 	"github.com/prodxcloud/vxcloud/install"
@@ -28,6 +30,7 @@ import (
 	"github.com/prodxcloud/vxcloud/transport"
 	"github.com/prodxcloud/vxcloud/vxchrono"
 	"github.com/prodxcloud/vxcloud/vxcomputer"
+	"github.com/prodxcloud/vxcloud/webscraper"
 	"github.com/prodxcloud/vxcloud/workflow"
 	"github.com/prodxcloud/vxcloud/workspace"
 )
@@ -224,6 +227,13 @@ func (c *Client) Install() *install.Client {
 	return &install.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
 }
 
+// AgentCLI returns the AI agent-CLI installer module — install / configure /
+// health / test-connection for Claude Code, OpenAI Codex, Google Gemini CLI,
+// the Hermes Agent, and OpenClaw on a remote VM over SSH.
+func (c *Client) AgentCLI() *agentcli.Client {
+	return &agentcli.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
+}
+
 // Deploy returns the container/stack deploy resource module.
 func (c *Client) Deploy() *deploy.Client {
 	return &deploy.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
@@ -237,6 +247,13 @@ func (c *Client) Marketplace() *marketplace.Client {
 // Cloud returns the cloud-provisioning resource module (S3, IAM, VM, …).
 func (c *Client) Cloud() *cloud.Client {
 	return &cloud.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
+}
+
+// Connector returns the SDK-direct deploy module — EC2/S3/Cloud Run/Route53/ALB
+// provisioned by calling cloud-provider SDKs and REST APIs directly (no
+// Terraform). Backed by /api/v2/connector/* on the tenant node.
+func (c *Client) Connector() *connector.Client {
+	return &connector.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
 }
 
 // Nodes returns the tenant-node management resource module.
@@ -266,6 +283,12 @@ func (c *Client) Networks() *networks.Client {
 // parallel/presets/tool/tools).
 func (c *Client) Agents() *agents.Client {
 	return &agents.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
+}
+
+// WebScraper returns the web-research agent module — concurrent BFS crawl,
+// multi-engine web search, and deep research (LLM or non-AI extractive).
+func (c *Client) WebScraper() *webscraper.Client {
+	return &webscraper.Client{T: c.t, NodeURL: c.NodeURL()}
 }
 
 // Chat returns the multi-provider AI chat module.
