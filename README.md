@@ -4,8 +4,13 @@
 
 ### Go · Python · TypeScript — one wire contract, three first-class SDKs
 
-Provision multi-cloud infrastructure, deploy apps, run governed AI agents, and
-drive the node control plane — from your code or CI.
+**The multi-cloud SDK & framework for developers — program your cloud in Go, Python, or TypeScript.**
+<br />
+Provision infrastructure as code — VMs, databases, Kubernetes, and serverless — across AWS, Azure, Google Cloud, Alibaba, Oracle, DigitalOcean & Linode.
+<br />
+Deploy apps, run CI/CD pipelines, and operate policy-governed AI agents and workflows straight from your code, terminal, or CI.
+<br />
+One wire contract, three first-class SDKs — no vendor lock-in, full multi-cloud portability.
 
 [![npm](https://img.shields.io/npm/v/%40vxcloud%2Fsdk?logo=npm&label=%40vxcloud%2Fsdk&color=CB3837)](https://www.npmjs.com/package/@vxcloud/sdk)
 [![PyPI](https://img.shields.io/pypi/v/vxsdk?logo=pypi&logoColor=white&label=vxsdk&color=3776AB)](https://pypi.org/project/vxsdk/)
