@@ -5,6 +5,22 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.14]
+
+### Changed — documentation
+
+Same code as `2026.8.13`. npm cannot rewrite the README of a published version,
+so the docs ship as their own release.
+
+- New **SalesShift** section with runnable TypeScript: `c.leads` (search,
+  `revealQuota`, `estimateRevealCost`, `revealLead`, `convertFromPool`),
+  `c.salesshift`, `c.opportunities`, `c.tasks`, `c.campaigns`, `c.social` and
+  `c.salesshiftBilling` — including the `simulated` delivery flag and the
+  null-means-unlimited quota rule.
+- Module table gains every SalesShift accessor; install table gains C++, Java
+  and the CLI.
+- Links block and author attribution.
+
 ## [2026.8.13]
 
 ### Added — Leads (`src/leads.ts`)

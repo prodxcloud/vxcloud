@@ -6,6 +6,24 @@ release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
 
+## [2026.8.14]
+
+### Changed — documentation
+
+Same code as `2026.8.13`. PyPI cannot rewrite the description of a published
+version, so the docs ship as their own release.
+
+- The landing page was a repo-internal file tree; it is now a real landing page
+  with badges, a hero, and section nav — matching `vxcloud`'s.
+- New **SalesShift** section with runnable Python covering the prospect pool
+  (masked addresses, quota, `preview_reveal_cost` before spending), pool → lead
+  → contact conversion via `describe_convert`, tracked email and campaigns,
+  opportunity signals, tasks, social distribution (`simulated` deliveries), and
+  SalesShift billing (`None` quota means unlimited) — plus the matching
+  `vxcli salesshift …` commands.
+- Resource map gains the `c.salesshift.*` and `c.sandboxes.*` rows.
+- Cross-language install table, Links block, and author attribution.
+
 ## [2026.8.13]
 
 ### Added — Leads / prospect pool

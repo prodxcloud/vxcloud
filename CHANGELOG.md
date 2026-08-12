@@ -5,6 +5,23 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.14]
+
+### Changed — documentation
+
+Same code as `2026.8.13`; this release exists to carry the docs, because a
+registry cannot rewrite the landing page of a version already published.
+
+- Every package README now documents the **SalesShift** surface with runnable
+  examples: prospect pool (search / quota / preview-cost / reveal), pool → lead
+  → contact conversion, tracked email and campaigns, opportunity signals, tasks,
+  social distribution, and SalesShift billing — plus the matching
+  `vxcli salesshift …` commands for each.
+- `vxsdk`'s PyPI landing page was a repo-internal file listing; it is now a
+  proper landing page matching `vxcloud`'s.
+- READMEs carry a cross-language install table (Python, TypeScript, Go, C++,
+  Java, CLI), a Links block, and author attribution.
+
 ## [2026.8.13]
 
 Released across every language at once: Go, Python (sync + async), TypeScript,

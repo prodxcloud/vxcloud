@@ -37,7 +37,7 @@ import (
 )
 
 // Version is the SDK version string. Bumped manually on tag.
-const Version = "2026.8.13"
+const Version = "2026.8.14"
 
 const (
 	defaultInfinityURL = "https://api.vxcloud.io"

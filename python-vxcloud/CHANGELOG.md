@@ -5,6 +5,14 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.8.14
+
+- Re-pinned to `vxsdk==2026.8.14` (base + `[async]` extra). No code changes.
+- README gains a **SalesShift** section with runnable examples (prospect pool,
+  reveal quota, pool → lead → contact, email, opportunities, tasks, social
+  distribution, billing) and the matching `vxcli salesshift …` commands.
+- Cross-language install table, Links block, and author attribution.
+
 ## 2026.8.13
 
 - Re-pinned to `vxsdk==2026.8.13` (base + `[async]` extra), which brings the

@@ -81,6 +81,8 @@ same JSON wire contract powers the Go and TypeScript SDKs.
 | **Marketplace** | `c.marketplace.agents.deploy(...)`, `c.marketplace.models.list()` | `/api/v2/marketplace/...` |
 | **AI agents** | `c.agentcontrol.*`, `c.vxcomputer.run(...)` | `/api/v2/{agentcontrol,vxcomputer}/...` |
 | **Workflows** | `c.workflow.create(...)`, `c.workflow.execute(...)`, `c.vxchrono.launch_run(...)` | `/api/v2/{workflow,vxchrono}/...` |
+| **Sandboxes** | `c.sandboxes.create(...)`, `c.sandboxes.wait_ready(...)`, `c.sandboxes.extend(...)` | `/api/v2/sandboxes/...` |
+| **SalesShift** | `c.salesshift.search_leads(...)`, `c.salesshift.send_email(...)`, `c.salesshift.list_opportunities(...)` | `/api/v1/salesshift/...` |
 | **Custom scripts** | `c.install.script(host=..., script="#!/bin/bash\n...")` | `/api/v2/tenant/install/script` |
 
 ```python
@@ -104,6 +106,91 @@ c.marketplace.agents.deploy(
     host="54.197.71.181", ssh_user="ubuntu", key_pair_name="AWSPRODKEY1.PEM",
     http_port="8094",
 )
+```
+
+## SalesShift — leads, CRM, campaigns and signals
+
+SalesShift is the go-to-market layer of the platform: the global prospect pool,
+the CRM it feeds, tracked email and campaigns, the cross-tenant opportunity
+signal pool, tasks, social distribution, and the workspace's own billing. It all
+hangs off `c.salesshift`.
+
+```python
+import vxcloud
+
+c  = vxcloud.Client.load_from_vxcli()
+ss = c.salesshift
+
+# ── Prospect pool ────────────────────────────────────────────────────
+# Search returns MASKED addresses (j•••@acme.com). A mask is not an
+# address — revealing one spends quota, so price the batch first.
+page = ss.search_leads(
+    filters={"seniority": ["c_level", "vp"], "country": ["AU"]},
+    limit=50,
+)
+ids = [p["pool_person_id"] for p in page["results"][:10]]
+
+print(ss.reveal_quota())                 # allowance / remaining / unlimited
+print(ss.preview_reveal_cost(ids))       # what this batch WOULD cost
+
+try:
+    print(ss.reveal_lead(ids[0])["email"])
+except vxcloud.VxLeadQuotaExhaustedError:
+    print("allowance spent — you were NOT charged for this attempt")
+except vxcloud.VxLeadErasedError:
+    print("erased at the person's request — terminal, never retry")
+
+# ── Pool → lead → contact ────────────────────────────────────────────
+ss.save_leads(ids)
+report = ss.convert_from_pool(ids, lifecycle_stage="lead")
+
+# A convert splits into buckets; a partial success reported as success is
+# how duplicate contacts get created. Render every bucket.
+print(vxcloud.describe_convert(report))
+
+# ── Email, campaigns, signals, tasks ─────────────────────────────────
+ss.send_email(to_email="ada@acme.com", subject="Quick question",
+              body_html="<p>Hi Ada…</p>")
+print(ss.get_stats())
+
+opps = ss.list_opportunities(source="hn", min_score=70)
+ss.push_opportunity_to_lead(opps["results"][0]["id"])
+ss.create_task("Follow up with Ada", goal="Book a 20-min call")
+
+# ── Social distribution ──────────────────────────────────────────────
+post = ss.create_social_post("Shipping vxcli 2026.8.13 today.")
+job  = ss.distribute_post(post["id"])
+
+# Fan-out is one goroutine per network; `speedup` is measured, not claimed.
+# `simulated` is true when the deployment holds no social API credentials —
+# always surface it rather than reporting a simulated post as published.
+for d in job["job"]["deliveries"]:
+    print(d["channel"], "SIMULATED" if d["simulated"] else "published")
+
+# ── Billing (what the workspace pays for SalesShift) ─────────────────
+sub = ss.billing_subscription()
+for code, limit in sub["plan"]["quotas"].items():
+    # None means UNLIMITED. A plain 0 would read as "no allowance" — the
+    # exact opposite of what the API means.
+    print(code, "unlimited" if limit is None else limit)
+```
+
+The same surface is available from the CLI, with `--output json|yaml` on every
+command and a confirmation prompt (`--yes` to skip) on anything that spends or
+destroys:
+
+```bash
+vxcli salesshift leads search --seniority c_level --country AU --limit 25
+vxcli salesshift leads quota
+vxcli salesshift leads reveal <pool-id>
+vxcli salesshift leads convert-from-pool <pool-id>… --lifecycle-stage lead
+vxcli salesshift email send --to ada@acme.com --subject "…" --html "<p>…</p>"
+vxcli salesshift campaigns report <campaign-id>
+vxcli salesshift contacts list
+vxcli salesshift opportunities list --source hn --min-score 70
+vxcli salesshift tasks add --title "Follow up" --goal "Book a call"
+vxcli salesshift social post --content "…"
+vxcli salesshift billing plans
 ```
 
 ## Async flavor
@@ -163,12 +250,29 @@ validation errors are surfaced immediately.
 | **Versioning** | Each `vxcloud` release pins the exact matching `vxsdk` release, so the surface is deterministic at install time. |
 | **Which to install** | Prefer the brand name? `pip install vxcloud`. Prefer the canonical name? `pip install vxsdk`. They are interchangeable. |
 
+## SDKs for every stack
+
+Same JSON wire contract, same auth model, same error taxonomy in every language.
+
+| Language | Package | Install |
+|---|---|---|
+| Python | [`vxcloud`](https://pypi.org/project/vxcloud/) · [`vxsdk`](https://pypi.org/project/vxsdk/) | `pip install vxcloud` |
+| TypeScript / Node | [`@vxcloud/sdk`](https://www.npmjs.com/package/@vxcloud/sdk) | `npm install @vxcloud/sdk` |
+| Go | [`github.com/prodxcloud/vxcloud`](https://github.com/prodxcloud/vxcloud) | `go get github.com/prodxcloud/vxcloud` |
+| C++ | [`cpp/`](https://github.com/prodxcloud/vxcloud/tree/main/cpp) | CMake or drop in two files (libcurl, C++17) |
+| Java | [`java/`](https://github.com/prodxcloud/vxcloud/tree/main/java) | Maven, `io.vxcloud:vxsdk` (JDK 11+, zero deps) |
+| CLI | `vxcli` | `curl -fsSL https://vxcloud.io/download/cli/install.sh \| sh` |
+
 ## Links
 
 - 📦 PyPI: [pypi.org/project/vxcloud](https://pypi.org/project/vxcloud/) · [pypi.org/project/vxsdk](https://pypi.org/project/vxsdk/)
 - 📖 Documentation: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
 - 🛠️ Source & issues: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud)
-- 📝 Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- 📝 Changelog: [CHANGELOG.md](https://github.com/prodxcloud/vxcloud/blob/main/python-vxcloud/CHANGELOG.md)
+
+## Author
+
+Built and maintained by **Joel O. Wembo** — [linkedin.com/in/joelwembo](https://www.linkedin.com/in/joelwembo/)
 
 ## License
 

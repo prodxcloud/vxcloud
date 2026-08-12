@@ -1,20 +1,26 @@
-# vxsdk (Python, preview)
+# vxsdk · Python SDK
 
-Single-file, stdlib-only Python port of [`../`](..) — the Go SDK.
+[![PyPI version](https://img.shields.io/pypi/v/vxsdk.svg)](https://pypi.org/project/vxsdk/)
+[![Python versions](https://img.shields.io/pypi/pyversions/vxsdk.svg)](https://pypi.org/project/vxsdk/)
+[![License](https://img.shields.io/pypi/l/vxsdk.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Downloads](https://static.pepy.tech/badge/vxsdk/month)](https://pepy.tech/project/vxsdk)
+[![Wheel](https://img.shields.io/pypi/wheel/vxsdk.svg)](https://pypi.org/project/vxsdk/#files)
 
-Same wire contract, same auth model (API key + auto-refresh on 401),
-same resource layout. Use this from Python scripts, Jupyter notebooks,
-data pipelines, or any internal Python service that needs to talk to
-the vxcloud platform.
+**Provision infrastructure, deploy applications, run AI agents, and drive the SalesShift GTM stack on the [vxcloud](https://vxcloud.io) platform — straight from Python.**
 
-```
-services/sdk/python/
-├── vxsdk.py           sync SDK — stdlib only, drop-in
-├── vxsdk_async.py     async SDK — same API, requires httpx
-├── deploy_app.py      runnable sync demo (container or stack)
-├── deploy_async.py    runnable async demo (3 deploys in parallel)
-└── README.md          this file
-```
+`vxsdk` is the canonical Python distribution of the vxcloud SDK. Same wire
+contract, same auth model (API key with automatic refresh on 401), and the same
+resource layout as the [Go](https://github.com/prodxcloud/vxcloud),
+[TypeScript](https://www.npmjs.com/package/@vxcloud/sdk), C++ and Java SDKs. The
+sync client is **stdlib-only** — zero third-party dependencies; the async client
+is one extra away.
+
+Prefer the brand name? [`pip install vxcloud`](https://pypi.org/project/vxcloud/)
+installs the identical surface under `import vxcloud`.
+
+[Installation](#installation) · [Quick start](#quick-start) · [SalesShift](#salesshift--leads-crm-campaigns-and-signals) · [Resource map](#resource-map) · [Async](#two-flavors) · [Errors](#errors) · [Docs](https://vxcloud.io/docs/sdks)
+
+---
 
 ## Two flavors
 
@@ -146,6 +152,171 @@ result = c.cloud.create_iam_policy("my-policy-001",
                                     policy_document={"Version": "2012-10-17", "Statement": [...]})
 ```
 
+## SalesShift — leads, CRM, campaigns and signals
+
+SalesShift is the go-to-market layer of the platform, and all of it hangs off
+`c.salesshift`. It covers the global prospect pool, the CRM that pool feeds,
+tracked email and campaigns, the cross-tenant opportunity signal pool, tasks,
+social distribution, and the workspace's own billing.
+
+### The prospect pool
+
+Search returns **masked** addresses (`j•••@acme.com`). A mask is not an address —
+revealing one spends quota, so price the batch before you spend it.
+
+```python
+import vxsdk
+
+c = vxsdk.Client.load_from_vxcli()
+ss = c.salesshift
+
+# Search the global pool. Paging is keyset-based; the cursor is opaque —
+# pass back exactly what the server gave you.
+page = ss.search_leads(
+    filters={"seniority": ["c_level", "vp"], "employee_range": ["51-200"],
+             "country": ["AU"], "department": ["engineering"]},
+    limit=50,
+)
+for p in page["results"]:
+    print(p["full_name"], p["title"], p["email"])   # email is MASKED here
+
+# Walk every page without hand-rolling the cursor loop
+for person in ss.search_all_leads(filters={"country": ["AU"]}):
+    ...
+
+# Where does this org stand on reveal quota?
+q = ss.reveal_quota()
+print(q["remaining"], "of", q["allowance"], "unlimited:", q["unlimited"])
+
+# Price a batch BEFORE spending anything on it
+ids = [p["pool_person_id"] for p in page["results"][:10]]
+est = ss.preview_reveal_cost(ids)
+print("would cost", est["cost"], "already revealed:", est["already_revealed"])
+
+# Reveal one. Nothing is charged if this raises VxLeadQuotaExhaustedError.
+try:
+    person = ss.reveal_lead(ids[0])
+    print(person["email"])                          # real address
+except vxsdk.VxLeadQuotaExhaustedError:
+    print("allowance spent — you were NOT charged for this attempt")
+except vxsdk.VxLeadErasedError:
+    print("erased at the person's request — terminal, never retry")
+```
+
+### Pool → lead → contact
+
+A pool row is not mailable. It becomes a lead when saved, and a mailable CRM
+contact only when converted.
+
+```python
+ss.save_leads(ids)                       # pool → saved leads
+leads = ss.list_leads(status="new", limit=100)
+
+report = ss.convert_from_pool(ids, lifecycle_stage="lead")
+
+# A convert splits into buckets. Reporting a partial success as success is
+# how duplicate contacts get created — render every bucket.
+print(vxsdk.describe_convert(report))
+
+ss.request_erasure(email="someone@example.com")     # GDPR, global + terminal
+ss.enrich_company(domain="acme.com")                # crawl + fill in firmographics
+```
+
+### Tracked email and campaigns
+
+```python
+ss.send_email(
+    to_email="ada@acme.com",
+    subject="Quick question about your deploy pipeline",
+    body_html="<p>Hi Ada — noticed you are hiring platform engineers…</p>",
+)
+
+for e in ss.list_emails(status="delivered"):
+    print(e["to_email"], e["opened_at"], e["clicked_at"])
+
+print(ss.get_stats())                    # sends, opens, clicks, bounces
+print(ss.get_worker_health())            # the Go email worker behind it
+
+cid = ss.create_campaign("AU founders Q3", "Subject line", "<p>Body</p>")["id"]
+ss.send_campaign(cid)
+report = ss.wait_for_campaign(cid, timeout=120)
+```
+
+### Opportunities, tasks and social
+
+```python
+# Opportunities are a cross-tenant signal pool — save/dismiss are per-org
+# side-table state, never a mutation of the shared signal.
+opps = ss.list_opportunities(source="hn", min_score=70, saved_only=False)
+ss.save_opportunity(opps["results"][0]["id"])
+ss.push_opportunity_to_lead(opps["results"][0]["id"])
+
+ss.create_task("Follow up with Ada", goal="Book a 20-min call", priority="high")
+for t in ss.list_tasks(status="open")["results"]:
+    print(t["title"], t["progress"], t["assignee_name"])
+
+post = ss.create_social_post("Shipping vxcli 2026.8.13 today.", title="Release")
+job = ss.distribute_post(post["id"])
+
+# Fan-out is one goroutine per network. `speedup` is measured, not claimed.
+print(job["job"]["speedup"], "x faster than sequential")
+
+# A deployment without social API credentials still returns delivery records.
+# Surface `simulated` — reporting a simulated post as published is the one
+# unforgivable lie this SDK could tell.
+for d in job["job"]["deliveries"]:
+    print(d["channel"], "SIMULATED" if d["simulated"] else "published")
+```
+
+### Billing (what the workspace pays for SalesShift)
+
+```python
+plans = ss.billing_plans()
+sub   = ss.billing_subscription()
+
+# Quota fields are None when UNLIMITED. A plain 0 would read as "no
+# allowance" — the exact opposite of what the API means.
+for code, limit in sub["plan"]["quotas"].items():
+    print(code, "unlimited" if limit is None else limit)
+
+print(ss.billing_checkout("growth", seats=5)["url"])
+for inv in ss.billing_invoices()["invoices"]:
+    print(inv["number"], inv["amount_due"], inv["status"])
+```
+
+### The same surface from `vxcli`
+
+Every call above has a CLI equivalent. All honour `--output json|yaml`, and
+spending or destructive commands confirm first and take `--yes`.
+
+```bash
+vxcli salesshift leads search --seniority c_level --country AU --limit 25
+vxcli salesshift leads quota
+vxcli salesshift leads reveal <pool-id>
+vxcli salesshift leads save <pool-id>…
+vxcli salesshift leads convert-from-pool <pool-id>… --lifecycle-stage lead
+vxcli salesshift leads enrich acme.com
+
+vxcli salesshift email send --to ada@acme.com --subject "…" --html "<p>…</p>"
+vxcli salesshift email stats
+vxcli salesshift campaigns list
+vxcli salesshift campaigns report <campaign-id>
+
+vxcli salesshift contacts list
+vxcli salesshift workflows test-run <id>
+vxcli salesshift sequences list
+
+vxcli salesshift opportunities list --source hn --min-score 70
+vxcli salesshift opportunities push-to-lead <id>
+vxcli salesshift tasks add --title "Follow up" --goal "Book a call"
+vxcli salesshift social post --content "…" && vxcli salesshift social send <post-id>
+vxcli salesshift webmaster inspect https://example.com
+
+vxcli salesshift billing plans
+vxcli salesshift billing invoices
+vxcli salesshift billing cancel --yes
+```
+
 ## Resource map
 
 | Path | Method | Backend endpoint |
@@ -178,9 +349,21 @@ result = c.cloud.create_iam_policy("my-policy-001",
 | `c.workflow.list/create/validate/execute/export` | GET/POST | `/api/v2/workflow/...` |
 | `c.vxchrono.create_goal/schedule/launch_run` | POST | `/api/v2/vxchrono/...` |
 | `c.robotic.list_robots/register_robot/send_command` | GET/POST | `/api/v2/robotic/...` |
+| `c.sandboxes.create/list/get/delete/extend/wait_ready` | POST/GET/DELETE | `/api/v2/sandboxes/...` |
+| `c.salesshift.{search_leads,search_all_leads,lead_facets}` | POST | `/api/v1/salesshift/leads/search`, `/facets` |
+| `c.salesshift.{reveal_quota,preview_reveal_cost,reveal_lead}` | GET/POST | `/api/v1/salesshift/leads/{quota,preview-cost,reveal}` |
+| `c.salesshift.{save_leads,list_leads,update_lead,convert_lead,convert_from_pool}` | GET/POST/PATCH | `/api/v1/salesshift/leads/...` |
+| `c.salesshift.{enrich_company,request_erasure,save_search}` | POST | `/api/v1/salesshift/leads/{enrich,erasure,searches}` |
+| `c.salesshift.{send_email,list_emails,get_stats,get_worker_health}` | GET/POST | `/api/v1/salesshift/email/...` |
+| `c.salesshift.{list_campaigns,create_campaign,send_campaign,wait_for_campaign}` | GET/POST | `/api/v1/salesshift/campaigns/...` |
+| `c.salesshift.{list_opportunities,save_opportunity,push_opportunity_to_lead}` | GET/POST/PATCH | `/api/v1/salesshift/opportunities/...` |
+| `c.salesshift.{list_tasks,create_task,update_task,complete_task,delete_task}` | GET/POST/PATCH/DELETE | `/api/v1/salesshift/tasks/...` |
+| `c.salesshift.{social_channels,create_social_post,distribute_post}` | GET/POST | `/api/v1/salesshift/social/...` |
+| `c.salesshift.{billing_plans,billing_subscription,billing_invoices,billing_checkout}` | GET/POST | `/api/v1/salesshift/billing/...` |
 
 Async parity: `vxsdk_async.AsyncClient` exposes the same modules,
-including `c.vxcomputer`, `c.workflow`, `c.vxchrono`, and `c.robotic`.
+including `c.vxcomputer`, `c.workflow`, `c.vxchrono`, `c.robotic`, and the
+full `c.salesshift` surface.
 
 ## Errors
 
@@ -249,3 +432,31 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## SDKs for every stack
+
+Same JSON wire contract, same auth model, same error taxonomy in every language.
+
+| Language | Package | Install |
+|---|---|---|
+| Python | [`vxsdk`](https://pypi.org/project/vxsdk/) · [`vxcloud`](https://pypi.org/project/vxcloud/) | `pip install vxsdk` |
+| TypeScript / Node | [`@vxcloud/sdk`](https://www.npmjs.com/package/@vxcloud/sdk) | `npm install @vxcloud/sdk` |
+| Go | [`github.com/prodxcloud/vxcloud`](https://github.com/prodxcloud/vxcloud) | `go get github.com/prodxcloud/vxcloud` |
+| C++ | [`cpp/`](https://github.com/prodxcloud/vxcloud/tree/main/cpp) | CMake or drop in two files (libcurl, C++17) |
+| Java | [`java/`](https://github.com/prodxcloud/vxcloud/tree/main/java) | Maven, `io.vxcloud:vxsdk` (JDK 11+, zero deps) |
+| CLI | `vxcli` | `curl -fsSL https://vxcloud.io/download/cli/install.sh \| sh` |
+
+## Links
+
+- 📦 PyPI: [pypi.org/project/vxcloud](https://pypi.org/project/vxcloud/) · [pypi.org/project/vxsdk](https://pypi.org/project/vxsdk/)
+- 📖 Documentation: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
+- 🛠️ Source & issues: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud)
+- 📝 Changelog: [CHANGELOG.md](https://github.com/prodxcloud/vxcloud/blob/main/python/CHANGELOG.md)
+
+## Author
+
+Built and maintained by **Joel O. Wembo** — [linkedin.com/in/joelwembo](https://www.linkedin.com/in/joelwembo/)
+
+## License
+
+Apache-2.0 © vxcloud / ProdXCloud
