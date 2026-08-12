@@ -1342,4 +1342,31 @@ export class AgentControl {
     );
     return res.body ?? {};
   }
+
+  /**
+   * Generate a deployable vLLM OpenAI-compatible serving artifact
+   * (docker-compose + command args + test curl). Mirrors the dashboard's
+   * vLLM Serving tab and Python `AgentControl.vllm_artifact`.
+   * POST /api/v2/agentcontrol/serving/vllm-artifact.
+   */
+  async vllmArtifact(input: {
+    model: string;
+    port?: number;
+    quantization?: string;
+    maxModelLen?: number;
+    loraModules?: Array<{ name: string; path: string }>;
+    tenantId?: string;
+  }): Promise<Record<string, unknown>> {
+    if (!input.model) throw new Error('agentcontrol.vllmArtifact: model is required');
+    const body: Record<string, unknown> = { model: input.model };
+    if (input.port) body.port = input.port;
+    if (input.quantization) body.quantization = input.quantization;
+    if (input.maxModelLen) body.max_model_len = input.maxModelLen;
+    if (input.loraModules && input.loraModules.length) body.lora_modules = input.loraModules;
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      '/api/v2/agentcontrol/serving/vllm-artifact', body,
+      { headers: tenantHeader(this.getTenant, input.tenantId) },
+    );
+    return res.body ?? {};
+  }
 }

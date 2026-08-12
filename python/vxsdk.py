@@ -49,9 +49,9 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
-__version__ = "2026.6.10"
+__version__ = "2026.8.13"
 
 DEFAULT_INFINITY_URL = "https://api.vxcloud.io"
 DEFAULT_TIMEOUT = 30
@@ -107,6 +107,39 @@ class VxNetworkError(VxError):
     """Transport failure (DNS, TCP, TLS, timeout). Safe to retry."""
 
 
+# ── Leads errors ───────────────────────────────────────────────────────
+# 402 and 410 are the two leads statuses a caller must be able to branch on
+# by TYPE. `_from_http` has no mapping for either, so both would otherwise
+# arrive as a bare VxError and be indistinguishable from any other 4xx — and
+# the two of them mean opposite things about whether to retry, and about
+# whether the customer was billed.
+#
+# Defined here rather than in vxsdk_async so BOTH flavors raise the SAME
+# class. Two identically-named classes in two modules is worse than none:
+# `except VxLeadQuotaExhaustedError` written against one client silently
+# fails to catch the other.
+
+class VxLeadQuotaExhaustedError(VxError):
+    """402 — this org's monthly reveal allowance is spent.
+
+    **Nothing was charged for the attempt that raised this.** Say so when you
+    surface it: a user who has just been refused assumes they paid for the
+    refusal unless told otherwise. Retrying is pointless until the allowance
+    resets or the tenant's ``lead_reveal_quota`` is raised; call
+    :meth:`SalesShift.reveal_quota` to show where they stand.
+    """
+
+
+class VxLeadErasedError(VxError):
+    """410 — the person exercised their right to erasure.
+
+    Terminal and global: the record was removed for every tenant, not just
+    this one, and it will not come back on the next crawl. This is not an
+    outage and is **not retryable** — presenting it as a transient failure
+    sends people into a retry loop against a deliberate refusal.
+    """
+
+
 def _from_http(op: str, status: int, message: str, detail: str, retry_after: int = 0) -> VxError:
     if status in (401, 403):
         return VxAuthError(op, message, status, detail)
@@ -126,6 +159,29 @@ def _is_retryable(err: BaseException) -> bool:
 
 
 # ── Credentials file (vxcli compat) ────────────────────────────────────
+
+def _jwt_expired(token: str, skew: int = 60) -> bool:
+    """Is this JWT past (or nearly past) its `exp`?
+
+    The signature is not verified — that is the server's job. All the client
+    needs locally is "should I bother sending this". Anything unparseable is
+    reported as NOT expired so the API stays the authority on a token shape we
+    do not recognise, rather than the SDK refusing to try.
+    """
+    import base64
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)   # restore padding
+        claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+    except Exception:
+        return False
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)):
+        return False
+    return time.time() + skew >= exp
+
 
 def _credentials_path() -> str:
     home = os.path.expanduser("~") if platform.system() != "Windows" else os.environ.get("USERPROFILE", os.path.expanduser("~"))
@@ -3427,6 +3483,33 @@ class AgentControl(_Resource):
                                  op="agentcontrol.runtime_metrics",
                                  headers=self.fine_tuning._ac_headers(tenant_id))
 
+    def vllm_artifact(self, *, model: str, port: int = 0, quantization: str = "",
+                      max_model_len: int = 0,
+                      lora_modules: list[dict[str, str]] | None = None,
+                      tenant_id: str = "") -> dict[str, Any]:
+        """Generate a deployable vLLM OpenAI-compatible serving artifact
+        (docker-compose + command args + test curl). Mirrors the dashboard's
+        vLLM Serving tab. POST /api/v2/agentcontrol/serving/vllm-artifact."""
+        if not model:
+            raise ValueError("agentcontrol.vllm_artifact: model is required")
+        if not self.client.node_url:
+            raise VxError("agentcontrol", "node_url not set on Client")
+        body: dict[str, Any] = {"model": model}
+        if port:
+            body["port"] = int(port)
+        if quantization:
+            body["quantization"] = quantization
+        if max_model_len:
+            body["max_model_len"] = int(max_model_len)
+        if lora_modules:
+            body["lora_modules"] = lora_modules
+        return self.client._json(
+            "POST", f"{self.client.node_url}/api/v2/agentcontrol/serving/vllm-artifact",
+            op="agentcontrol.vllm_artifact",
+            headers=self.fine_tuning._ac_headers(tenant_id),
+            json_body=body,
+        )
+
 
 # ── VXCOMPUTER / Robotic / VxChrono (local control-plane services) ──────
 
@@ -3660,12 +3743,24 @@ class Workflow(_Resource):
     A *workflow* is a node graph (definition); an *execution* is one run of
     it. Mirrors /api/v2/workflow/*."""
 
+    def _uid(self, path: str) -> str:
+        """Append the authenticated ``user_id`` query param the builder routes
+        require. Mirrors vxcli's wfWithUserID (services/cli/cmd/workflow.go):
+        the workflow CRUD/save/publish endpoints scope by ``user_id`` read from
+        the query string, not the JWT — omitting it returns 400 "user_id query
+        parameter is required". No-op when the id can't be derived."""
+        uid = self.client.auth_user_id()
+        if not uid:
+            return path
+        sep = "&" if "?" in path else "?"
+        return f"{path}{sep}user_id={urllib.parse.quote(uid)}"
+
     # ── workflow definitions (CRUD) ──
 
     def list(self) -> dict[str, Any]:
         """List saved workflows."""
         return self.client._json(
-            "GET", self.client.node_url + "/api/v2/workflow/workflows",
+            "GET", self.client.node_url + self._uid("/api/v2/workflow/workflows"),
             op="workflow.list")
 
     def get(self, workflow_id: str) -> dict[str, Any]:
@@ -3673,13 +3768,13 @@ class Workflow(_Resource):
         if not workflow_id:
             raise ValueError("workflow.get: workflow_id is required")
         return self.client._json(
-            "GET", self.client.node_url + f"/api/v2/workflow/workflows/{workflow_id}",
+            "GET", self.client.node_url + self._uid(f"/api/v2/workflow/workflows/{workflow_id}"),
             op="workflow.get")
 
     def create(self, definition: dict[str, Any]) -> dict[str, Any]:
         """Create a new workflow from a node-graph definition."""
         return self.client._json(
-            "POST", self.client.node_url + "/api/v2/workflow/workflows",
+            "POST", self.client.node_url + self._uid("/api/v2/workflow/workflows"),
             op="workflow.create", json_body=definition)
 
     def delete(self, workflow_id: str) -> dict[str, Any]:
@@ -3687,19 +3782,21 @@ class Workflow(_Resource):
         if not workflow_id:
             raise ValueError("workflow.delete: workflow_id is required")
         return self.client._json(
-            "DELETE", self.client.node_url + f"/api/v2/workflow/workflows/{workflow_id}",
+            "DELETE", self.client.node_url + self._uid(f"/api/v2/workflow/workflows/{workflow_id}"),
             op="workflow.delete")
 
     def save(self, definition: dict[str, Any]) -> dict[str, Any]:
         """Save (upsert) a workflow definition."""
         return self.client._json(
-            "POST", self.client.node_url + "/api/v2/workflow/save",
+            "POST", self.client.node_url + self._uid("/api/v2/workflow/save"),
             op="workflow.save", json_body=definition)
 
     def publish(self, definition: dict[str, Any]) -> dict[str, Any]:
-        """Publish a workflow."""
+        """Publish a workflow. Requires ``session_id`` (from a prior save) and
+        ``git`` repo config in ``definition`` — publish pushes the workflow to
+        a git repository."""
         return self.client._json(
-            "POST", self.client.node_url + "/api/v2/workflow/publish",
+            "POST", self.client.node_url + self._uid("/api/v2/workflow/publish"),
             op="workflow.publish", json_body=definition)
 
     # ── validation / execution ──
@@ -3782,6 +3879,1606 @@ class Whoami:
     workspace: str = ""
 
 
+# ── Instant Sandboxes (ephemeral dev environments) ───────────────────
+#
+# Maps to /api/v2/sandbox/* on the tenant node (mirrors `vxcli sandbox`).
+# Providers: firecracker-micro | podman-container | nix-devshell | vm-debian.
+class Sandboxes(_Resource):
+    """Create and manage ephemeral, auto-expiring dev sandboxes."""
+
+    _PROVIDERS = ("firecracker-micro", "podman-container", "nix-devshell", "vm-debian")
+
+    def create(self, *, provider: str = "podman-container", username: str = "dev",
+               ttl: int = 3600, tags: list[str] | None = None,
+               org: str = "", workspace: str = "",
+               placement: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a sandbox. Returns {sandbox_id, private_key, status, ...}.
+        The private_key is returned ONLY here — persist it to SSH in later.
+
+        placement selects WHERE the sandbox runs:
+          {"mode": "managed"}                                    → node-local podman (default)
+          {"mode": "self_hosted_node", "node_id": "..."}         → a registered tenant node
+          {"mode": "custom_vm", "ssh_host": "1.2.3.4",           → SSH into your own VM and
+           "ssh_user": "ubuntu", "ssh_private_key": "<PEM>"}       build the sandbox container there
+        """
+        if provider not in self._PROVIDERS:
+            raise VxValidationError("sandbox.create", f"invalid provider {provider!r}")
+        body: dict[str, Any] = {
+            "provider_id": provider, "username": username, "ttl": ttl,
+            "org": org or self.client.organization, "tags": tags or [],
+        }
+        if workspace:
+            body["workspace"] = workspace
+        if placement:
+            body["placement"] = placement
+        return self.client._json("POST", self.client.node_url + "/api/v2/sandbox/create",
+                                 op="sandbox.create", json_body=body, timeout=300)
+
+    def list(self, *, org: str = "") -> list[dict[str, Any]]:
+        o = org or self.client.organization
+        out = self.client._json("GET", self.client.node_url + f"/api/v2/sandbox/list?org={o}",
+                                op="sandbox.list")
+        return out.get("sandboxes", []) if isinstance(out, dict) else []
+
+    def get(self, sandbox_id: str) -> dict[str, Any]:
+        return self.client._json("GET", self.client.node_url + f"/api/v2/sandbox/{sandbox_id}",
+                                 op="sandbox.get")
+
+    def delete(self, sandbox_id: str) -> dict[str, Any]:
+        return self.client._json("DELETE", self.client.node_url + f"/api/v2/sandbox/{sandbox_id}",
+                                 op="sandbox.delete")
+
+    def extend(self, sandbox_id: str, additional_seconds: int = 3600) -> dict[str, Any]:
+        return self.client._json("POST",
+                                 self.client.node_url + f"/api/v2/sandbox/{sandbox_id}/extend",
+                                 op="sandbox.extend",
+                                 json_body={"additional_seconds": additional_seconds})
+
+    def wait_ready(self, sandbox_id: str, *, timeout: int = 300, interval: int = 5) -> dict[str, Any]:
+        """Poll get() until the sandbox is 'ready' (or raise on failed/expired/timeout)."""
+        import time as _t
+        deadline = _t.monotonic() + timeout
+        while _t.monotonic() < deadline:
+            d = self.get(sandbox_id)
+            st = d.get("status")
+            if st == "ready":
+                return d
+            if st in ("failed", "expired"):
+                raise VxError("sandbox.wait", f"sandbox became {st}")
+            _t.sleep(interval)
+        raise VxError("sandbox.wait", "timed out waiting for sandbox to become ready")
+
+
+# ── SalesShift leads — shared constants and helpers ────────────────────
+#
+# Implements salesshift/doc/LEADS_CLIENT_CONTRACT.md. The names below match
+# the Python column of that document's §7 table, so this binding, vxcli and
+# the other SDKs describe one feature with one vocabulary.
+
+#: The character the server substitutes for an address this org has not paid
+#: to see: ``mask_email()`` in leads_router.py renders ``j•••@acme.com``.
+#: U+2022 BULLET — this file is UTF-8, as is the server module it mirrors. If
+#: a transcoding step ever mangles it, ``is_masked_email`` silently stops
+#: recognising masks, so keep the two spellings in step.
+_MASK_MARKER = "•"
+
+#: ``limit`` ceiling on /leads/search. The server clamps rather than rejects,
+#: so we clamp identically instead of inventing a client-only error.
+_LEADS_PAGE_MAX = 100
+
+#: Ceiling on /leads/save and /leads/convert-from-pool. Enforced here too so a
+#: 201-id batch fails before it is sent rather than after a round trip.
+_LEADS_BATCH_MAX = 200
+
+#: Every bucket ``POST /leads/convert-from-pool`` splits its input into. Each
+#: id lands in exactly one of them, so they sum to the number of ids passed.
+#: Contract rule 4: a client that prints only ``converted`` is hiding a partial
+#: spend, so ``describe_convert`` walks all five — including the zeros.
+_CONVERT_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("converted", "converted to contacts"),
+    ("already_converted", "already contacts — no quota spent"),
+    ("skipped_no_quota", "skipped — reveal allowance exhausted"),
+    ("skipped_no_email", "skipped — no address in the pool"),
+    ("skipped_erased", "skipped — erased at the person's request"),
+)
+
+
+def is_masked_email(value: str | None) -> bool:
+    """True when ``value`` is a MASK rather than a real address.
+
+    Contract rule 2: an unrevealed address comes back as ``j•••@acme.com``.
+    ``has_email`` says an address EXISTS; ``email_revealed`` says whether you
+    may see it. A masked string must never be presented as an address, copied
+    as one, or handed to anything that sends — call :meth:`SalesShift.reveal_lead`
+    to obtain the real one (which spends quota).
+    """
+    return bool(value) and _MASK_MARKER in str(value)
+
+
+def describe_convert(result: dict[str, Any]) -> str:
+    """Render EVERY bucket of a ``convert_from_pool`` (or ``bulk_convert_leads``)
+    result as human-readable text.
+
+    Contract rule 4. ``convert-from-pool`` accounts for every id passed in, and
+    reporting only ``converted`` turns a partial spend into an apparent success
+    — which is how people stop believing the meter. This prints each bucket
+    even when it is zero, the reveals actually spent, and the quota left.
+
+    Unknown ``skipped_*`` keys are printed too, so a bucket added to the server
+    later shows up here instead of vanishing.
+
+        >>> print(vxsdk.describe_convert(client.salesshift.convert_from_pool(ids)))
+    """
+    if not isinstance(result, dict):
+        raise VxValidationError("salesshift.describe_convert",
+                                "result must be the response dict from "
+                                "convert_from_pool()/bulk_convert_leads()")
+
+    known = {name for name, _ in _CONVERT_BUCKETS}
+    accounted = sum(int(result.get(name) or 0) for name, _ in _CONVERT_BUCKETS)
+
+    lines = [f"convert: {accounted} id(s) accounted for"]
+    for name, meaning in _CONVERT_BUCKETS:
+        lines.append(f"  {name:<20} {int(result.get(name) or 0):>5}  {meaning}")
+
+    # Anything the server reports that this SDK predates. Better a row nobody
+    # styled than a silently dropped skip.
+    for key in sorted(result):
+        if key.startswith("skipped_") and key not in known:
+            lines.append(f"  {key:<20} {int(result.get(key) or 0):>5}  "
+                         "(bucket unknown to this SDK version)")
+
+    if "revealed_now" in result:
+        spent = int(result.get("revealed_now") or 0)
+        lines.append(f"  {'revealed_now':<20} {spent:>5}  reveals SPENT by this call")
+
+    contact_ids = result.get("contact_ids") or []
+    if contact_ids:
+        lines.append(f"  {'contact_ids':<20} {len(contact_ids):>5}  contact id(s) returned")
+
+    quota = result.get("quota") or {}
+    if quota:
+        lines.append(f"  quota: {quota.get('display', '?')} used, "
+                     f"{quota.get('remaining', '?')} reveals remaining")
+    return "\n".join(lines)
+
+
+def _leads_error(op: str, exc: VxError) -> VxError:
+    """Give 402 and 410 the words contract §6 requires.
+
+    Both arrive from ``_from_http`` as a bare :class:`VxError` with no reason
+    string attached, which renders as an unreadable ``op: 402``. They are the
+    two statuses a caller most needs to branch on — one means a spend did NOT
+    happen, the other means a record is permanently gone — so they get named
+    conditions rather than being left to look like a generic failure.
+
+    ``http_status`` and ``detail`` are preserved, so callers can still branch on
+    ``err.http_status``. Any other error is returned untouched.
+
+    The two are raised as :class:`VxLeadQuotaExhaustedError` and
+    :class:`VxLeadErasedError` — the same classes the async client raises, so
+    one ``except`` clause covers both flavors. Both subclass :class:`VxError`,
+    so code that already catches the base keeps working.
+    """
+    if exc.http_status == 402:
+        return VxLeadQuotaExhaustedError(op,
+                       "reveal allowance spent for this period — NOTHING was "
+                       "charged for this attempt; raise the tenant's "
+                       "lead_reveal_quota or wait for the monthly reset",
+                       402, exc.detail)
+    if exc.http_status == 410:
+        return VxLeadErasedError(op,
+                       "erased at the person's request — removed for EVERY "
+                       "tenant, not just yours. Terminal: this is not an "
+                       "outage and retrying will never succeed",
+                       410, exc.detail)
+    return exc
+
+
+class SalesShift(_Resource):
+    """SalesShift email service — tracked sends through the org's BYOK
+    providers (tenant-node Go email worker preferred), suppression gating,
+    daily caps + warmup ramp, open/click tracking, and the SendGrid-style
+    Kafka event stream (topic ``salesshift.email.events``).
+
+    Also the leads pool: searching the global pool of people and companies,
+    revealing masked addresses against a metered allowance, saving rows into
+    the tenant's own list, and converting them into mailable Contacts. See
+    ``salesshift/doc/LEADS_CLIENT_CONTRACT.md`` — the five rules it opens with
+    are enforced or documented on the methods below, and the two that bite
+    hardest are:
+
+    * **Leads are not mailable.** :meth:`send_email` takes a contact address.
+      The only route from a lead to a mailable record is :meth:`convert_lead`
+      or :meth:`convert_from_pool`, which is where consent metadata is written.
+    * **An unrevealed address is a mask, not an address** — see
+      :func:`is_masked_email`.
+
+    Control-plane endpoints (infinity): ``/api/v1/salesshift/*``
+    Tenant-node endpoint: ``/api/v2/salesshift/email/health``
+    """
+
+    def send_email(self, to_email: str, subject: str, body_html: str, *,
+                   first_name: str = "", last_name: str = "") -> dict[str, Any]:
+        """Send one tracked email. Merge tags like ``{{first_name}}`` resolve
+        against the contact record; suppressed recipients are rejected."""
+        if not to_email or not subject or not body_html:
+            raise VxValidationError("salesshift.send_email",
+                                    "to_email, subject and body_html are required")
+        # Contract rules 1 and 2, caught at the last possible moment: a masked
+        # lead address is not deliverable, and a send path is exactly where it
+        # must never arrive. Cheap to check, and the alternative is a bounce
+        # against a domain whose reputation the tenant depends on.
+        if is_masked_email(to_email):
+            raise VxValidationError(
+                "salesshift.send_email",
+                f"{to_email!r} is a MASKED lead address, not a real one. Leads "
+                "are not mailable: reveal_lead() to unmask, then convert_lead() "
+                "or convert_from_pool() to create a Contact, and send to that")
+        payload: dict[str, Any] = {
+            "to_email": to_email, "subject": subject, "body_html": body_html,
+        }
+        if first_name:
+            payload["first_name"] = first_name
+        if last_name:
+            payload["last_name"] = last_name
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/email/send",
+            op="salesshift.send_email", json_body=payload, target="infinity",
+        )
+
+    def list_emails(self, status: str = "") -> list[dict[str, Any]]:
+        """Tracked outbound emails with engagement state (opens/clicks/replies)."""
+        url = self.client.infinity_url + "/api/v1/salesshift/emails"
+        if status:
+            url += f"?status={status}"
+        body = self.client._json("GET", url, op="salesshift.list_emails",
+                                 target="infinity")
+        return list(body.get("data") or [])
+
+    def get_stats(self) -> dict[str, Any]:
+        """Live dashboard stats (contacts, deals, email funnel)."""
+        return self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/stats",
+            op="salesshift.get_stats", target="infinity",
+        )
+
+    def get_worker_health(self) -> dict[str, Any]:
+        """Health of the tenant-node Go email worker (:8744)."""
+        self.client.ensure_node_url()
+        return self.client._json(
+            "GET", self.client.node_url + "/api/v2/salesshift/email/health",
+            op="salesshift.get_worker_health",
+        )
+
+    # ── leads: transport ──
+
+    def _leads(self, method: str, path: str, *, op: str,
+               json_body: Any | None = None,
+               timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
+        """One call against the leads API.
+
+        Every leads endpoint lives on the **Infinity control plane**, never on
+        the tenant node, so ``path`` is joined to ``infinity_url`` exactly as
+        the email methods above do. Resolving these against ``node_url`` would
+        404 on a healthy system and look like a missing feature.
+
+        Wraps 402 and 410 in named errors — see :func:`_leads_error`.
+        """
+        try:
+            return self.client._json(method, self.client.infinity_url + path,
+                                     op=op, json_body=json_body,
+                                     target="infinity", timeout=timeout)
+        except VxError as exc:
+            named = _leads_error(op, exc)
+            if named is exc:
+                raise
+            raise named from exc
+
+    @staticmethod
+    def _search_body(filters: dict[str, Any] | None, result_type: str,
+                     cursor: str, limit: int, sort_field: str,
+                     sort_desc: bool) -> dict[str, Any]:
+        """Assemble a /leads/search payload. Shared with /leads/facets so the
+        two cannot disagree about how a filter set is spelled."""
+        body: dict[str, Any] = {
+            "filters": dict(filters or {}),
+            "result_type": result_type,
+            # Opaque, and empty means "from the beginning".
+            "cursor": cursor or "",
+            # The server clamps to 100 rather than rejecting; clamp identically
+            # so the two never disagree about what limit=500 means.
+            "limit": max(1, min(int(limit), _LEADS_PAGE_MAX)),
+        }
+        if sort_field:
+            body["sort"] = {"field": sort_field, "desc": bool(sort_desc)}
+        return body
+
+    # ── leads: the pool ──
+
+    def search_leads(self, *, filters: dict[str, Any] | None = None,
+                     result_type: str = "person", cursor: str = "",
+                     limit: int = 25, sort_field: str = "",
+                     sort_desc: bool = True) -> dict[str, Any]:
+        """Search the global lead pool. Returns the ``data`` envelope:
+        ``items``, ``total``, ``total_display``, ``total_is_estimate``,
+        ``next_cursor``, ``search_backend`` and the ``sort`` APPLIED.
+
+        Three things about the result that are easy to render wrongly:
+
+        * **Addresses in ``items`` are MASKED** unless ``email_revealed`` is
+          true. ``has_email`` means one exists, not that you may see it. Use
+          :func:`is_masked_email` before doing anything with ``item["email"]``.
+        * **Render ``total_display``, not ``total``**, whenever
+          ``total_is_estimate`` is true — counting stops at 10,000 and the
+          display then reads ``"10,000+"``. Printing the raw ``total`` there
+          states a precise number that is not true.
+        * **Render the ``sort`` the server echoes**, not the one you asked for.
+          An unknown ``sort_field`` silently degrades to score descending, so
+          a UI showing the requested column labels the wrong ordering.
+
+        ``sort_field`` for people: ``score`` (default), ``name``, ``title``,
+        ``company``, ``location``, ``employees``, ``email``. For companies:
+        ``score``, ``name``, ``employees``, ``industry``, ``location``.
+
+        ``cursor`` is OPAQUE: pass back a ``next_cursor`` verbatim, never parse
+        or construct one, and never carry one across a change of sort or
+        filters — a keyset position only means anything within the result set
+        and ordering that produced it. Reusing one after re-sorting compares
+        the wrong column and silently drops or repeats rows. Prefer
+        :meth:`search_all_leads` for a full walk.
+
+        ``limit`` is clamped to 100. Raises on 400 for a malformed cursor.
+        """
+        body = self._search_body(filters, result_type, cursor, limit,
+                                 sort_field, sort_desc)
+        out = self._leads("POST", "/api/v1/salesshift/leads/search",
+                          op="salesshift.search_leads", json_body=body)
+        return out.get("data") or {}
+
+    def search_all_leads(self, *, filters: dict[str, Any] | None = None,
+                         result_type: str = "person",
+                         limit: int = _LEADS_PAGE_MAX,
+                         sort_field: str = "", sort_desc: bool = True,
+                         max_pages: int = 100) -> Iterator[dict[str, Any]]:
+        """Walk every page of a search, yielding one item at a time.
+
+        Follows ``next_cursor`` to exhaustion, holding the filters and the
+        ordering fixed for the whole walk — a cursor is only valid within the
+        ordering that produced it, so this re-sends the sort the server ECHOED
+        rather than the one requested (they differ when an unknown field
+        degrades to score desc).
+
+        Reveals nothing and spends no quota: every yielded address is still
+        masked unless this org had already revealed that row.
+
+        ``max_pages`` bounds the walk — at ``limit=100`` the default reaches
+        10,000 rows, which is where the server's own counter caps. Hitting the
+        bound with a cursor still outstanding raises :class:`VxError` rather
+        than returning quietly, because a truncated walk that looks complete is
+        how a "we have no prospects in Germany" conclusion gets drawn from half
+        a result set. Raise ``max_pages`` or narrow the filters.
+
+        ``result_type="company"`` is served without a cursor and is therefore
+        always a single page.
+
+            >>> for lead in client.salesshift.search_all_leads(
+            ...         filters={"seniorities": ["founder"], "countries": ["AU"]}):
+            ...     print(lead["full_name"], lead["email"])   # email is MASKED
+        """
+        if max_pages < 1:
+            raise VxValidationError("salesshift.search_all_leads",
+                                    "max_pages must be at least 1")
+        cursor = ""
+        field, desc = sort_field, sort_desc
+        seen: set[str] = set()
+
+        for _page in range(max_pages):
+            data = self.search_leads(filters=filters, result_type=result_type,
+                                     cursor=cursor, limit=limit,
+                                     sort_field=field, sort_desc=desc)
+            items = list(data.get("items") or [])
+            for item in items:
+                yield item
+
+            applied = data.get("sort") or {}
+            if applied.get("field"):
+                field, desc = str(applied["field"]), bool(applied.get("desc", True))
+
+            cursor = data.get("next_cursor") or ""
+            if not cursor or not items:
+                return
+            # A repeated cursor means the position stopped advancing; walking it
+            # again would re-yield the same page forever.
+            if cursor in seen:
+                raise VxError("salesshift.search_all_leads",
+                              "the server repeated a pagination cursor — "
+                              "stopping rather than looping over one page")
+            seen.add(cursor)
+
+        raise VxError(
+            "salesshift.search_all_leads",
+            f"stopped after max_pages={max_pages} with more results still "
+            "outstanding — this walk is INCOMPLETE; raise max_pages or narrow "
+            "the filters rather than treating these items as the full set")
+
+    def lead_facets(self, *, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Counts per ``seniority`` / ``department`` / ``country`` /
+        ``email_status`` / ``industry`` for a filter set — the numbers shown
+        beside each filter control.
+
+        Pool-wide and tenant-blind: the number of Directors in the pool is the
+        same for every org, so nothing here is masked or metered.
+        """
+        body = self._search_body(filters, "person", "", _LEADS_PAGE_MAX, "", True)
+        out = self._leads("POST", "/api/v1/salesshift/leads/facets",
+                          op="salesshift.lead_facets", json_body=body)
+        return out.get("data") or {}
+
+    def get_pool_person(self, pool_id: str) -> dict[str, Any]:
+        """Full detail for one person in the pool, plus this org's relationship
+        to them (``saved_lead_id``, ``existing_contact_id``, ``email_revealed``).
+
+        Masking applies here exactly as in search — a detail view is not a back
+        door around the meter. Raises on 404 (not in the pool) and 410 (erased,
+        terminal).
+        """
+        if not pool_id:
+            raise VxValidationError("salesshift.get_pool_person",
+                                    "pool_id is required")
+        out = self._leads("GET", f"/api/v1/salesshift/leads/pool/{pool_id}",
+                          op="salesshift.get_pool_person")
+        return out.get("data") or {}
+
+    def get_pool_company(self, company_id: str) -> dict[str, Any]:
+        """One company plus its people, split into ``new_prospects`` and
+        ``existing_contacts`` — what is left to work versus what this org
+        already owns. Addresses in both lists follow the usual masking.
+        """
+        if not company_id:
+            raise VxValidationError("salesshift.get_pool_company",
+                                    "company_id is required")
+        out = self._leads("GET", f"/api/v1/salesshift/leads/company/{company_id}",
+                          op="salesshift.get_pool_company")
+        return out.get("data") or {}
+
+    # ── leads: the meter ──
+
+    def reveal_quota(self) -> dict[str, Any]:
+        """Reveals ``used`` / ``allowance`` / ``remaining`` for this period,
+        plus a ready-made ``display`` string.
+
+        Cheap and read-only — call it before any bulk operation that can
+        reveal, so the cost is visible before it is spent rather than after.
+        """
+        out = self._leads("GET", "/api/v1/salesshift/leads/quota",
+                          op="salesshift.reveal_quota")
+        return out.get("data") or {}
+
+    def reveal_lead(self, pool_person_id: str) -> dict[str, Any]:
+        """Un-mask one person: real ``email``, ``phone``, ``linkedin_url``, and
+        the ``quota`` left afterwards.
+
+        **Spends one reveal from the metered allowance** — unless this org has
+        already revealed this row, which is free. Also back-fills any saved
+        lead that was stored while still masked.
+
+        Raises on 402 when the allowance is spent, and that error says so
+        explicitly: NOTHING was charged for the failed attempt. Raises on 410
+        when the person has been erased — terminal, never retryable.
+        """
+        if not pool_person_id:
+            raise VxValidationError("salesshift.reveal_lead",
+                                    "pool_person_id is required")
+        out = self._leads("POST", "/api/v1/salesshift/leads/reveal",
+                          op="salesshift.reveal_lead",
+                          json_body={"pool_person_id": pool_person_id})
+        return out.get("data") or {}
+
+    def preview_reveal_cost(self, pool_person_ids: list[str]) -> dict[str, Any]:
+        """What a bulk convert *could* cost, before you run it.
+
+        Read-only: reads the live quota and compares it against the batch. No
+        reveal is spent and nothing is converted. Returns ``requested``,
+        ``max_reveals`` (the worst case — rows this org already revealed are
+        free, so the true spend is usually lower), ``quota``, ``remaining`` and
+        ``would_exceed_allowance``.
+
+        Exists because :meth:`convert_from_pool` can spend up to one reveal per
+        id, and a bulk helper that does not surface its cost before acting is
+        how a monthly allowance disappears in a single click.
+        """
+        ids = [str(x) for x in (pool_person_ids or [])]
+        if not ids:
+            raise VxValidationError("salesshift.preview_reveal_cost",
+                                    "pool_person_ids is required")
+        quota = self.reveal_quota()
+        remaining = int(quota.get("remaining") or 0)
+        return {
+            "requested": len(ids),
+            "max_reveals": len(ids),
+            "quota": quota,
+            "remaining": remaining,
+            "would_exceed_allowance": len(ids) > remaining,
+        }
+
+    # ── leads: the tenant's own list ──
+
+    def save_leads(self, pool_person_ids: list[str]) -> dict[str, Any]:
+        """Copy pool rows into this tenant's saved leads. Returns ``saved`` and
+        ``already_saved``.
+
+        A SNAPSHOT, not a reference: the pool is re-crawled continuously and a
+        qualified list must not change underneath the person who qualified it.
+        Saving spends no quota and reveals nothing — a row saved while masked
+        stores no address until it is revealed. Max 200 ids per call.
+        """
+        ids = [str(x) for x in (pool_person_ids or [])]
+        if not ids:
+            raise VxValidationError("salesshift.save_leads",
+                                    "pool_person_ids is required")
+        if len(ids) > _LEADS_BATCH_MAX:
+            raise VxValidationError(
+                "salesshift.save_leads",
+                f"max {_LEADS_BATCH_MAX} leads per save, got {len(ids)}")
+        return self._leads("POST", "/api/v1/salesshift/leads/save",
+                           op="salesshift.save_leads",
+                           json_body={"pool_person_ids": ids})
+
+    def list_leads(self, *, status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        """This tenant's saved leads.
+
+        Each row carries ``email_masked`` and ``has_email`` alongside ``email``,
+        so a lead saved before being revealed can be shown as "not revealed
+        yet" rather than "no address" — the two look identical on the row
+        itself and confusing them tells a rep to skip a good prospect.
+        """
+        path = "/api/v1/salesshift/leads"
+        query: dict[str, Any] = {}
+        if status:
+            query["status"] = status
+        if limit:
+            query["limit"] = limit
+        if query:
+            path += "?" + urllib.parse.urlencode(query)
+        out = self._leads("GET", path, op="salesshift.list_leads")
+        return list(out.get("data") or [])
+
+    def get_lead(self, lead_id: str) -> dict[str, Any]:
+        """One saved lead, the live pool row behind it, and ``drift``.
+
+        ``drift`` is non-empty when the pool has moved on since the snapshot
+        was taken (title changed, company changed, address status changed) —
+        surfacing it is what stops someone discovering the change via a bounce.
+        """
+        if not lead_id:
+            raise VxValidationError("salesshift.get_lead", "lead_id is required")
+        out = self._leads("GET", f"/api/v1/salesshift/leads/{lead_id}",
+                          op="salesshift.get_lead")
+        return out.get("data") or {}
+
+    def update_lead(self, lead_id: str, *, status: str | None = None,
+                    notes: str | None = None, tags: list[str] | None = None,
+                    score: int | None = None, owner_id: str | None = None,
+                    disqualify_reason: str | None = None) -> dict[str, Any]:
+        """Update a saved lead's working state. Only the arguments you pass are
+        sent, so this never clears a field by omission."""
+        if not lead_id:
+            raise VxValidationError("salesshift.update_lead",
+                                    "lead_id is required")
+        body: dict[str, Any] = {}
+        for key, value in (("status", status), ("notes", notes), ("tags", tags),
+                           ("score", score), ("owner_id", owner_id),
+                           ("disqualify_reason", disqualify_reason)):
+            if value is not None:
+                body[key] = value
+        if not body:
+            raise VxValidationError(
+                "salesshift.update_lead",
+                "pass at least one of status, notes, tags, score, owner_id, "
+                "disqualify_reason")
+        out = self._leads("PATCH", f"/api/v1/salesshift/leads/{lead_id}",
+                          op="salesshift.update_lead", json_body=body)
+        return out.get("data") or {}
+
+    # ── leads: the one-way gate into mailable Contacts ──
+
+    def convert_lead(self, lead_id: str, *,
+                     lifecycle_stage: str = "lead") -> dict[str, Any]:
+        """Saved lead → Contact. The moment a record becomes mailable.
+
+        This is the ONLY route from a lead to something a send, sequence or
+        campaign may touch, and it is where consent metadata is written. The
+        lead row is kept as an audit trail, never moved.
+
+        Returns ``contact_id``, plus ``reused_existing_contact`` when the
+        address was already a contact, or ``already_converted`` when this lead
+        had been converted before.
+
+        Raises 400 with a distinguishable reason: either the lead has no
+        revealed address (reveal it first) or it has been erased.
+        """
+        if not lead_id:
+            raise VxValidationError("salesshift.convert_lead",
+                                    "lead_id is required")
+        return self._leads("POST", f"/api/v1/salesshift/leads/{lead_id}/convert",
+                           op="salesshift.convert_lead",
+                           json_body={"lifecycle_stage": lifecycle_stage})
+
+    def bulk_convert_leads(self, lead_ids: list[str]) -> dict[str, Any]:
+        """Many saved leads → Contacts.
+
+        Spends no quota: it converts only leads whose address this org already
+        holds. Reports ``converted``, ``already_converted`` and
+        ``skipped_no_email`` — pass the result to :func:`describe_convert` to
+        render all three rather than only the successes.
+        """
+        ids = [str(x) for x in (lead_ids or [])]
+        if not ids:
+            raise VxValidationError("salesshift.bulk_convert_leads",
+                                    "lead_ids is required")
+        return self._leads("POST", "/api/v1/salesshift/leads/bulk-convert",
+                           op="salesshift.bulk_convert_leads",
+                           json_body={"lead_ids": ids}, timeout=120)
+
+    def convert_from_pool(self, pool_person_ids: list[str], *,
+                          reveal_if_needed: bool = True,
+                          lifecycle_stage: str = "lead") -> dict[str, Any]:
+        """Pool → Contact in one step: save, reveal if needed, convert.
+
+        **This SPENDS QUOTA** — up to one reveal per id when
+        ``reveal_if_needed`` is true (the default, matching the server). Call
+        :meth:`preview_reveal_cost` first to see the worst case against the
+        live allowance. ``reveal_if_needed=False`` converts only rows already
+        revealed and reports the rest as ``skipped_no_quota``, spending
+        nothing.
+
+        The response accounts for **every id passed in**, split across
+        ``converted``, ``already_converted``, ``skipped_no_quota``,
+        ``skipped_no_email`` and ``skipped_erased``, plus ``revealed_now`` and
+        the resulting ``quota``. When the allowance runs out mid-batch the
+        server converts what it can and reports the remainder — so rendering
+        only ``converted`` presents a partial spend as a clean success. Use
+        :func:`describe_convert` to print all of it:
+
+            >>> res = client.salesshift.convert_from_pool(ids)
+            >>> print(vxsdk.describe_convert(res))
+
+        Max 200 ids per call — reveals are metered, and a larger batch would
+        spend more in one call than anyone intends.
+        """
+        ids = [str(x) for x in (pool_person_ids or [])]
+        if not ids:
+            raise VxValidationError("salesshift.convert_from_pool",
+                                    "pool_person_ids is required")
+        if len(ids) > _LEADS_BATCH_MAX:
+            raise VxValidationError(
+                "salesshift.convert_from_pool",
+                f"max {_LEADS_BATCH_MAX} per convert, got {len(ids)} — reveals "
+                "are metered, so a bigger batch would spend more quota than "
+                "anyone intends in one call")
+        return self._leads("POST", "/api/v1/salesshift/leads/convert-from-pool",
+                           op="salesshift.convert_from_pool",
+                           json_body={"pool_person_ids": ids,
+                                      "reveal_if_needed": bool(reveal_if_needed),
+                                      "lifecycle_stage": lifecycle_stage},
+                           timeout=120)
+
+    # ── leads: right to be forgotten ──
+
+    def request_erasure(self, *, email: str = "", linkedin_url: str = "",
+                        reason: str = "gdpr_erasure", note: str = "",
+                        confirm: bool = False) -> dict[str, Any]:
+        """Erase a person from the lead pool. **Global and irreversible.**
+
+        This does not remove the person from *your* org — it removes them for
+        EVERY tenant on the platform, deactivates the pool row so a future
+        crawl cannot resurrect them, strips the contact fields, and flags every
+        saved copy anyone holds. There is no undo: the address is retained only
+        as a hash, precisely so it cannot be recovered.
+
+        Because of that, ``confirm=True`` is required. The flag is not busywork
+        — it exists so this cannot be reached by a caller who thinks they are
+        cleaning up their own list.
+
+        Pass ``email`` or ``linkedin_url`` (or both). Returns
+        ``pool_rows_erased``, ``saved_leads_flagged`` and ``already_recorded``.
+        """
+        if not email and not linkedin_url:
+            raise VxValidationError("salesshift.request_erasure",
+                                    "email or linkedin_url is required")
+        if not confirm:
+            raise VxValidationError(
+                "salesshift.request_erasure",
+                "refusing without confirm=True: erasure is GLOBAL and "
+                "IRREVERSIBLE — it removes this person from the pool for every "
+                "tenant on the platform, not just yours, and cannot be undone")
+        body: dict[str, Any] = {"reason": reason}
+        if email:
+            body["email"] = email
+        if linkedin_url:
+            body["linkedin_url"] = linkedin_url
+        if note:
+            body["note"] = note
+        return self._leads("POST", "/api/v1/salesshift/leads/erasure",
+                           op="salesshift.request_erasure", json_body=body)
+
+    def enrich_company(self, *, company_id: str = "", domain: str = "",
+                       ) -> dict[str, Any]:
+        """Crawl a company's own website and fold what it finds into the pool.
+
+        The only call here that WRITES to the shared pool, so what it refuses
+        to do matters as much as what it does:
+
+        * **Gaps only.** An existing description, keyword set or address is
+          never replaced by crawl output.
+        * **Erasure is checked before every insert**, so a crawl cannot bring
+          back someone who asked to be forgotten.
+        * **Shared mailboxes are not people.** ``sales@``, ``info@``,
+          ``announce@`` and their regional variants are dropped, and a name is
+          derived from an address only when the local part plausibly is one.
+        * **Everything found is unverified**, and no reveal quota is spent.
+
+        Pass ``company_id`` for a company already in the pool, or ``domain``
+        for one that is not — in which case the crawl CREATES the company and
+        any people it finds.
+
+        Read ``crawled`` in the result first. When it is 0, ``note`` says why
+        (blocked by a CDN, nothing readable, a server error) and nothing was
+        written. Slow by nature: it fetches up to a dozen pages, and the
+        server's own ceiling is 90 seconds.
+        """
+        domain = (domain or "").strip().lower()
+        for prefix in ("https://", "http://"):
+            if domain.startswith(prefix):
+                domain = domain[len(prefix):]
+        domain = domain.split("/")[0]
+        if not company_id and not domain:
+            raise VxValidationError("salesshift.enrich_company",
+                                    "company_id or domain is required")
+        body: dict[str, Any] = {}
+        if company_id:
+            body["company_id"] = company_id
+        if domain:
+            body["domain"] = domain
+        return self._leads("POST", "/api/v1/salesshift/leads/enrich",
+                           op="salesshift.enrich_company", json_body=body)
+
+    # ── leads: saved searches ──
+
+    def list_saved_searches(self) -> list[dict[str, Any]]:
+        """This org's saved lead searches (filter sets, not results)."""
+        out = self._leads("GET", "/api/v1/salesshift/lead-searches",
+                          op="salesshift.list_saved_searches")
+        return list(out.get("data") or [])
+
+    def save_search(self, name: str, *, filters: dict[str, Any] | None = None,
+                    is_shared: bool = False) -> dict[str, Any]:
+        """Save a filter set for reuse. Stores the filters only — results are
+        re-run against the live pool, never frozen."""
+        if not name:
+            raise VxValidationError("salesshift.save_search", "name is required")
+        out = self._leads("POST", "/api/v1/salesshift/lead-searches",
+                          op="salesshift.save_search",
+                          json_body={"name": name, "filters": filters or {},
+                                     "is_shared": bool(is_shared)})
+        return out.get("data") or {}
+
+    #: Also available as ``vxsdk.describe_convert`` — one implementation, bound
+    #: here so it is discoverable next to the call whose output it renders.
+    describe_convert = staticmethod(describe_convert)
+
+    # ── campaigns ──
+    #
+    # One-to-many blasts. The audience is Contacts, never leads: a lead has no
+    # consent record and no address you are entitled to mail, which is the same
+    # rule ``send_email`` enforces one recipient at a time.
+
+    def list_campaigns(self) -> list[dict[str, Any]]:
+        """Every campaign in the workspace, newest first."""
+        body = self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/campaigns",
+            op="salesshift.list_campaigns", target="infinity")
+        return list(body.get("data") or [])
+
+    def create_campaign(self, name: str, subject: str, body_html: str, *,
+                        contact_ids: list[str] | None = None,
+                        list_ids: list[str] | None = None,
+                        from_email: str = "", from_name: str = "",
+                        reply_to: str = "") -> dict[str, Any]:
+        """Create a campaign. Does **not** send — call :meth:`send_campaign`.
+
+        Leave ``from_email`` empty to use the organisation's default sending
+        integration, whose configured From and Reply-To are used as-is. Setting
+        it stamps that address in the From header, so the sending domain has to
+        authorise it or SPF/DKIM alignment breaks and the mail lands in spam.
+        """
+        if not name or not subject or not body_html:
+            raise VxValidationError("salesshift.create_campaign",
+                                    "name, subject and body_html are required")
+        contacts = list(contact_ids or [])
+        lists = list(list_ids or [])
+        if not contacts and not lists:
+            raise VxValidationError("salesshift.create_campaign",
+                                    "pass contact_ids and/or list_ids — a campaign with no audience sends nothing")
+        payload: dict[str, Any] = {
+            "name": name, "subject": subject, "body_html": body_html,
+            "contact_ids": contacts, "list_ids": lists,
+        }
+        # Only include sender overrides the caller actually set: "" is not the
+        # same as "unset", and posting a blank From would ask for a blank header
+        # rather than the default integration.
+        if from_email:
+            payload["from_email"] = from_email
+        if from_name:
+            payload["from_name"] = from_name
+        if reply_to:
+            payload["reply_to"] = reply_to
+
+        body = self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/campaigns",
+            op="salesshift.create_campaign", target="infinity", json_body=payload)
+        return body.get("data") or body
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Campaign, every tracked recipient, and the hourly engagement timeline.
+
+        Returns ``{"campaign": …, "recipients": [...], "timeline": [...]}``.
+        Each recipient carries ``contact_id`` so a report can link straight back
+        into the CRM instead of making the reader search for the person.
+        """
+        if not campaign_id:
+            raise VxValidationError("salesshift.get_campaign", "campaign_id is required")
+        body = self.client._json(
+            "GET", f"{self.client.infinity_url}/api/v1/salesshift/campaigns/{campaign_id}",
+            op="salesshift.get_campaign", target="infinity")
+        return {
+            "campaign": body.get("data") or {},
+            "recipients": list(body.get("recipients") or []),
+            "timeline": list(body.get("timeline") or []),
+        }
+
+    def send_campaign(self, campaign_id: str, send_at: str = "") -> dict[str, Any]:
+        """Send now, or schedule when ``send_at`` (RFC3339) is given.
+
+        The send is asynchronous: the returned counts are the state *before*
+        delivery starts and will read zero. Use :meth:`wait_for_campaign` — or
+        re-read :meth:`get_campaign` — for the real outcome.
+        """
+        if not campaign_id:
+            raise VxValidationError("salesshift.send_campaign", "campaign_id is required")
+        payload: dict[str, Any] = {}
+        if send_at:
+            payload["send_at"] = send_at
+        body = self.client._json(
+            "POST", f"{self.client.infinity_url}/api/v1/salesshift/campaigns/{campaign_id}/send",
+            op="salesshift.send_campaign", target="infinity", json_body=payload)
+        return body.get("data") or body
+
+    def wait_for_campaign(self, campaign_id: str, *, timeout: int = 120,
+                          poll: float = 2.0) -> dict[str, Any]:
+        """Block until the sender has finished, then return the campaign.
+
+        Exists because :meth:`send_campaign` returns immediately and its counts
+        are always zero at that moment — reporting those verbatim says "0 sent"
+        for a campaign that delivered to everyone, which is the most alarming
+        possible way to report success.
+        """
+        deadline = time.time() + timeout
+        latest: dict[str, Any] = {}
+        while time.time() < deadline:
+            latest = self.get_campaign(campaign_id)["campaign"]
+            done = int(latest.get("sent_count") or 0) + int(latest.get("failed_count") or 0)
+            if latest.get("status") != "sending" and done > 0:
+                return latest
+            time.sleep(poll)
+        return latest
+
+    # ── platform billing ──
+    #
+    # What this workspace pays SalesShift. Not to be confused with the
+    # customer's own quote-to-cash (`/subscriptions`, `/invoices`), which is
+    # money THEIR customers pay THEM.
+
+    def billing_plans(self) -> dict[str, Any]:
+        """Published tiers plus whether checkout is possible on this deployment."""
+        return self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/plans",
+            op="salesshift.billing_plans", target="infinity")
+
+    def billing_subscription(self) -> dict[str, Any]:
+        """This workspace's plan, seats and pooled allowance.
+
+        A quota of ``None`` in ``allowance`` means unlimited — never zero.
+        """
+        return self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/subscription",
+            op="salesshift.billing_subscription", target="infinity")
+
+    def billing_invoices(self) -> dict[str, Any]:
+        """Invoices from Stripe. A comped workspace has no payment account, so
+        this is an empty list with ``reason`` set — not an error."""
+        return self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/invoices",
+            op="salesshift.billing_invoices", target="infinity")
+
+    def billing_checkout(self, plan_code: str, seats: int = 1) -> dict[str, Any]:
+        """Open a Stripe Checkout session. Nothing is charged until it is
+        completed on Stripe's hosted page."""
+        if not plan_code:
+            raise VxValidationError("salesshift.billing_checkout", "plan_code is required")
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/billing/checkout",
+            op="salesshift.billing_checkout", target="infinity",
+            json_body={"plan_code": plan_code, "seats": max(1, int(seats))})
+
+    # ── social distribution ──
+
+    def social_channels(self) -> dict[str, Any]:
+        """The distribution catalogue with each network's real limits.
+
+        ``simulated`` is true unless the deployment holds social API
+        credentials — surface it, because reporting a simulated post as
+        published is the one genuinely misleading thing this client can do.
+        """
+        return self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/social/channels",
+            op="salesshift.social_channels", target="infinity")
+
+    def social_posts(self, status: str = "") -> list[dict[str, Any]]:
+        url = self.client.infinity_url + "/api/v1/salesshift/social/posts"
+        if status:
+            url += f"?status={status}"
+        body = self.client._json("GET", url, op="salesshift.social_posts", target="infinity")
+        return list(body.get("posts") or [])
+
+    def create_social_post(self, content: str, *, title: str = "", link_url: str = "",
+                           images: int = 0, hashtags: list[str] | None = None,
+                           channels: list[str] | None = None,
+                           scheduled_at: str = "") -> dict[str, Any]:
+        """Save a post. Set ``scheduled_at`` (RFC3339) to hand it to the Celery
+        beat worker rather than distributing now."""
+        if not content:
+            raise VxValidationError("salesshift.create_social_post", "content is required")
+        payload = {
+            "content": content, "title": title or None, "link_url": link_url or None,
+            "images": int(images), "hashtags": list(hashtags or []),
+            "channels": list(channels or []),
+            "scheduled_at": scheduled_at or None,
+        }
+        body = self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/social/posts",
+            op="salesshift.create_social_post", target="infinity", json_body=payload)
+        return body.get("post") or {}
+
+    def distribute_post(self, post_id: str, concurrency: int = 0) -> dict[str, Any]:
+        """Fan the post out across its channels in parallel.
+
+        Returns ``{"post": …, "job": …}``; the job carries ``wall_ms`` against
+        ``sequential_ms`` so the parallelism is a measurement, not a claim.
+        """
+        if not post_id:
+            raise VxValidationError("salesshift.distribute_post", "post_id is required")
+        return self.client._json(
+            "POST", f"{self.client.infinity_url}/api/v1/salesshift/social/posts/{post_id}/distribute",
+            op="salesshift.distribute_post", target="infinity",
+            json_body={"concurrency": int(concurrency)}, timeout=180)
+
+    def webmaster_inspect(self, url: str) -> dict[str, Any]:
+        """Fetch a live page and report what a crawler finds on it."""
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/social/webmaster/inspect",
+            op="salesshift.webmaster_inspect", target="infinity", json_body={"url": url})
+
+    # ── opportunities (the cross-tenant signal pool) ──
+
+    def list_opportunities(self, **filters: Any) -> dict[str, Any]:
+        """Signals from the shared pool.
+
+        Accepts ``q``, ``source``, ``signal_type``, ``industry``, ``min_score``,
+        ``saved_only`` and ``limit``. The rows are shared by every tenant; the
+        saved/dismissed flags are this organisation's own state, joined in.
+        """
+        from urllib.parse import quote
+        pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
+        url = self.client.infinity_url + "/api/v1/salesshift/opportunities"
+        if pairs:
+            url += "?" + "&".join(pairs)
+        return self.client._json("GET", url, op="salesshift.list_opportunities",
+                                 target="infinity")
+
+    def push_opportunity_to_lead(self, opportunity_id: str) -> dict[str, Any]:
+        """Copy the signal's published contact into this workspace's CRM.
+
+        Fails with 422 when the signal carries no email — there is nothing to
+        build a contact from, and inventing one is not an option.
+        """
+        if not opportunity_id:
+            raise VxValidationError("salesshift.push_opportunity_to_lead",
+                                    "opportunity_id is required")
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}/push-to-lead",
+            op="salesshift.push_opportunity_to_lead", target="infinity", json_body={})
+
+    # ── tasks ──
+
+    def list_tasks(self, **filters: Any) -> dict[str, Any]:
+        """Tasks plus the workspace roster. Accepts ``status``, ``task_type``,
+        ``priority``, ``assignee_id``, ``q`` and ``limit``."""
+        from urllib.parse import quote
+        pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
+        url = self.client.infinity_url + "/api/v1/salesshift/tasks"
+        if pairs:
+            url += "?" + "&".join(pairs)
+        return self.client._json("GET", url, op="salesshift.list_tasks", target="infinity")
+
+    def create_task(self, title: str, *, description: str = "", goal: str = "",
+                    due_at: str = "", task_type: str = "todo",
+                    priority: str = "medium", progress: int = 0,
+                    assignee_id: int | None = None) -> dict[str, Any]:
+        """Create a task.
+
+        ``goal`` is what has to exist when the task is finished. It is optional
+        but the board is markedly less useful without it: a title says what to
+        do, a goal says how anyone else can tell it is done.
+        """
+        if not title:
+            raise VxValidationError("salesshift.create_task", "title is required")
+        payload: dict[str, Any] = {
+            "title": title, "task_type": task_type, "priority": priority,
+            "progress": max(0, min(100, int(progress))),
+        }
+        if description:
+            payload["description"] = description
+        if goal:
+            payload["goal"] = goal
+        if due_at:
+            payload["due_at"] = due_at
+        if assignee_id is not None:
+            payload["assignee_id"] = int(assignee_id)
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/tasks",
+            op="salesshift.create_task", target="infinity", json_body=payload)
+
+    def update_task(self, task_id: str, **fields: Any) -> dict[str, Any]:
+        """Partial update. Only the keys you pass are sent, so moving a due
+        date cannot blank the goal.
+
+        Accepts ``title``, ``description``, ``goal``, ``due_at``, ``task_type``,
+        ``priority``, ``status`` and ``progress``. Setting ``status='done'``
+        stamps ``completed_at`` and forces progress to 100 server-side.
+        """
+        if not task_id:
+            raise VxValidationError("salesshift.update_task", "task_id is required")
+        allowed = {"title", "description", "goal", "due_at", "task_type",
+                   "priority", "status", "progress", "assignee_id"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise VxValidationError("salesshift.update_task",
+                                    f"unknown field(s): {', '.join(sorted(unknown))}")
+        # No `if v` filter here: progress=0 and status='' are meaningful
+        # resets, and dropping them would make the reset silently no-op.
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if not payload:
+            raise VxValidationError("salesshift.update_task", "nothing to update")
+        return self.client._json(
+            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/tasks/{task_id}",
+            op="salesshift.update_task", target="infinity", json_body=payload)
+
+    def complete_task(self, task_id: str) -> dict[str, Any]:
+        """Mark a task done. Progress goes to 100 and ``completed_at`` is set."""
+        return self.update_task(task_id, status="done")
+
+    def delete_task(self, task_id: str) -> None:
+        """Delete a task. Returns 204, so there is no body to hand back."""
+        if not task_id:
+            raise VxValidationError("salesshift.delete_task", "task_id is required")
+        self.client._json(
+            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/tasks/{task_id}",
+            op="salesshift.delete_task", target="infinity")
+
+    # ── opportunities: the send half ──
+
+    def get_opportunity(self, opportunity_id: str) -> dict[str, Any]:
+        """One signal in full."""
+        if not opportunity_id:
+            raise VxValidationError("salesshift.get_opportunity",
+                                    "opportunity_id is required")
+        return self.client._json(
+            "GET",
+            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}",
+            op="salesshift.get_opportunity", target="infinity")
+
+    def post_opportunity(self, title: str, description: str, *,
+                         category: str = "", company_name: str = "",
+                         contact_email: str = "", location: str = "",
+                         skills: list[str] | None = None,
+                         budget_min: float | None = None,
+                         budget_max: float | None = None,
+                         duration: str = "") -> dict[str, Any]:
+        """Publish a signal into the shared pool.
+
+        The pool is cross-tenant, so this row becomes visible to every
+        workspace, and ``contact_email`` is the address applicants will write
+        to. Left blank, your own account address is used.
+        """
+        if len(title) < 4 or len(description) < 10:
+            raise VxValidationError(
+                "salesshift.post_opportunity",
+                "title must be 4+ chars and description 10+ chars")
+        payload: dict[str, Any] = {
+            "title": title, "description": description,
+            "skills": (skills or [])[:12],
+        }
+        for key, value in (("category", category), ("company_name", company_name),
+                           ("contact_email", contact_email), ("location", location),
+                           ("duration", duration)):
+            if value:
+                payload[key] = value
+        if budget_min is not None:
+            payload["budget_min"] = budget_min
+        if budget_max is not None:
+            payload["budget_max"] = budget_max
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/opportunities",
+            op="salesshift.post_opportunity", target="infinity", json_body=payload)
+
+    def apply_to_opportunity(self, opportunity_id: str, message: str, *,
+                             proposed_rate: str = "") -> dict[str, Any]:
+        """Reply to a signal: record the application AND email the poster.
+
+        Two things happen, and they can succeed independently. The application
+        row is always written (a second apply is refused with 409). The
+        engagement email only goes out when the signal carries a contact
+        address, so check ``email_sent`` rather than assuming ``success``
+        means a message was delivered.
+        """
+        if not opportunity_id:
+            raise VxValidationError("salesshift.apply_to_opportunity",
+                                    "opportunity_id is required")
+        if len(message.strip()) < 5:
+            raise VxValidationError("salesshift.apply_to_opportunity",
+                                    "message must be at least 5 characters")
+        payload: dict[str, Any] = {"message": message}
+        if proposed_rate:
+            payload["proposed_rate"] = proposed_rate
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}/apply",
+            op="salesshift.apply_to_opportunity", target="infinity", json_body=payload)
+
+    def save_opportunity(self, opportunity_id: str, saved: bool = True) -> dict[str, Any]:
+        """Save (or un-save) a signal for this workspace only."""
+        return self._opportunity_patch(opportunity_id, {"is_saved": saved},
+                                       "salesshift.save_opportunity")
+
+    def dismiss_opportunity(self, opportunity_id: str) -> dict[str, Any]:
+        """Hide a signal from this workspace's feed. Other tenants still see it."""
+        return self._opportunity_patch(opportunity_id, {"is_dismissed": True},
+                                       "salesshift.dismiss_opportunity")
+
+    def _opportunity_patch(self, opportunity_id: str, body: dict[str, Any],
+                           op: str) -> dict[str, Any]:
+        if not opportunity_id:
+            raise VxValidationError(op, "opportunity_id is required")
+        return self.client._json(
+            "PATCH",
+            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}",
+            op=op, target="infinity", json_body=body)
+
+    # ── contacts: the only mailable records ──
+
+    def list_contacts(self, **filters: Any) -> dict[str, Any]:
+        """One page of contacts plus the pagination envelope.
+
+        Accepts ``search``, ``lifecycle_stage``, ``company_id``, ``min_score``,
+        ``email_status`` (``has_email``/``unsubscribed``), ``page`` and
+        ``limit``. The grand total is ``pagination.total``, not ``len(data)``.
+        """
+        from urllib.parse import quote
+        pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
+        url = self.client.infinity_url + "/api/v1/salesshift/contacts"
+        if pairs:
+            url += "?" + "&".join(pairs)
+        return self.client._json("GET", url, op="salesshift.list_contacts",
+                                 target="infinity")
+
+    def get_contact(self, contact_id: str) -> dict[str, Any]:
+        """One contact in full."""
+        if not contact_id:
+            raise VxValidationError("salesshift.get_contact", "contact_id is required")
+        return self.client._json(
+            "GET", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.get_contact", target="infinity")
+
+    def create_contact(self, email: str, **fields: Any) -> dict[str, Any]:
+        """Create a contact.
+
+        ``email`` is required: a contact without an address is skipped by every
+        send path, so one created without it is dead weight.
+        """
+        if not email:
+            raise VxValidationError("salesshift.create_contact", "email is required")
+        payload = {"email": email}
+        payload.update({k: v for k, v in fields.items() if v not in (None, "")})
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/contacts",
+            op="salesshift.create_contact", target="infinity", json_body=payload)
+
+    def update_contact(self, contact_id: str, **fields: Any) -> dict[str, Any]:
+        """Partial update of a contact."""
+        if not contact_id:
+            raise VxValidationError("salesshift.update_contact", "contact_id is required")
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if not payload:
+            raise VxValidationError("salesshift.update_contact", "nothing to update")
+        return self.client._json(
+            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.update_contact", target="infinity", json_body=payload)
+
+    def delete_contact(self, contact_id: str) -> None:
+        """Delete a contact and its activity."""
+        if not contact_id:
+            raise VxValidationError("salesshift.delete_contact", "contact_id is required")
+        self.client._json(
+            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.delete_contact", target="infinity")
+
+    def send_contact_email(self, contact_id: str, subject: str, body_html: str, *,
+                           from_email: str = "", from_name: str = "",
+                           reply_to: str = "") -> dict[str, Any]:
+        """Send one tracked email to a contact.
+
+        Goes through the full pipeline: suppression gate, sending pool, open
+        pixel and unsubscribe footer. A refused send is not an exception — it
+        returns ``success: False`` with a reason, because declining to mail
+        someone is a policy outcome, not a transport failure.
+        """
+        if not contact_id:
+            raise VxValidationError("salesshift.send_contact_email",
+                                    "contact_id is required")
+        if not subject or not body_html:
+            raise VxValidationError("salesshift.send_contact_email",
+                                    "subject and body_html are required")
+        payload: dict[str, Any] = {"subject": subject, "body_html": body_html}
+        for key, value in (("from_email", from_email), ("from_name", from_name),
+                           ("reply_to", reply_to)):
+            if value:
+                payload[key] = value
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/send-email",
+            op="salesshift.send_contact_email", target="infinity", json_body=payload)
+
+    def add_contact_note(self, contact_id: str, content: str) -> dict[str, Any]:
+        """Attach a note, which also stamps ``last_activity``."""
+        if not contact_id or not content:
+            raise VxValidationError("salesshift.add_contact_note",
+                                    "contact_id and content are required")
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/notes",
+            op="salesshift.add_contact_note", target="infinity",
+            json_body={"content": content})
+
+    def contact_activities(self, contact_id: str) -> list[dict[str, Any]]:
+        """The contact's timeline, newest first."""
+        if not contact_id:
+            raise VxValidationError("salesshift.contact_activities",
+                                    "contact_id is required")
+        out = self.client._json(
+            "GET",
+            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/activities",
+            op="salesshift.contact_activities", target="infinity")
+        return out.get("data", []) if isinstance(out, dict) else []
+
+    def list_contact_lists(self) -> list[dict[str, Any]]:
+        """This workspace's contact lists."""
+        out = self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/lists",
+            op="salesshift.list_contact_lists", target="infinity")
+        return out.get("data", []) if isinstance(out, dict) else []
+
+    # ── workflows: the /automations canvas ──
+
+    def list_workflows(self, status: str = "") -> list[dict[str, Any]]:
+        """Every workflow, optionally filtered by ``draft``/``active``/``paused``."""
+        url = self.client.infinity_url + "/api/v1/salesshift/workflows"
+        if status:
+            from urllib.parse import quote
+            url += f"?status={quote(status)}"
+        out = self.client._json("GET", url, op="salesshift.list_workflows",
+                                target="infinity")
+        return out.get("data", []) if isinstance(out, dict) else []
+
+    def get_workflow(self, workflow_id: str) -> dict[str, Any]:
+        """One workflow with its graph fully hydrated."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.get_workflow", "workflow_id is required")
+        out = self.client._json(
+            "GET", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.get_workflow", target="infinity")
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def create_workflow(self, name: str, *, description: str = "",
+                        trigger_type: str = "",
+                        graph: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a workflow. One with an empty graph is a draft and cannot be
+        activated until it has nodes."""
+        if not name:
+            raise VxValidationError("salesshift.create_workflow", "name is required")
+        payload: dict[str, Any] = {"name": name}
+        if description:
+            payload["description"] = description
+        if trigger_type:
+            payload["trigger_type"] = trigger_type
+        if graph is not None:
+            payload["graph"] = graph
+        out = self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/workflows",
+            op="salesshift.create_workflow", target="infinity", json_body=payload)
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def update_workflow(self, workflow_id: str, **fields: Any) -> dict[str, Any]:
+        """Partial update. Passing ``graph`` replaces the whole canvas."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.update_workflow",
+                                    "workflow_id is required")
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if not payload:
+            raise VxValidationError("salesshift.update_workflow", "nothing to update")
+        out = self.client._json(
+            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.update_workflow", target="infinity", json_body=payload)
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def delete_workflow(self, workflow_id: str) -> None:
+        """Delete a workflow along with its runs and step history."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.delete_workflow",
+                                    "workflow_id is required")
+        self.client._json(
+            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.delete_workflow", target="infinity")
+
+    def _workflow_action(self, workflow_id: str, action: str) -> dict[str, Any]:
+        if not workflow_id:
+            raise VxValidationError(f"salesshift.{action}_workflow",
+                                    "workflow_id is required")
+        out = self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/{action}",
+            op=f"salesshift.{action}_workflow", target="infinity", json_body={})
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def activate_workflow(self, workflow_id: str) -> dict[str, Any]:
+        """Activate. The server re-lints the graph first, so a 400 here is a
+        validation failure, not a transport problem."""
+        return self._workflow_action(workflow_id, "activate")
+
+    def pause_workflow(self, workflow_id: str) -> dict[str, Any]:
+        """Stop new enrollments. Runs already in flight continue."""
+        return self._workflow_action(workflow_id, "pause")
+
+    def duplicate_workflow(self, workflow_id: str) -> dict[str, Any]:
+        """Copy a workflow, graph included, as a new draft."""
+        return self._workflow_action(workflow_id, "duplicate")
+
+    def validate_workflow(self, workflow_id: str) -> dict[str, Any]:
+        """Lint the graph without running it. Warnings do not block
+        activation; errors do."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.validate_workflow",
+                                    "workflow_id is required")
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/validate",
+            op="salesshift.validate_workflow", target="infinity", json_body={})
+
+    def test_run_workflow(self, workflow_id: str, *, contact_id: str = "",
+                          dry_run: bool = True) -> dict[str, Any]:
+        """Run the graph once and get the step-by-step trace.
+
+        ``dry_run`` defaults to True so a test cannot mail anyone by accident.
+        With no ``contact_id`` a transient sample contact is used and the run
+        is flagged ``is_sample``, keeping real run history clean.
+        """
+        if not workflow_id:
+            raise VxValidationError("salesshift.test_run_workflow",
+                                    "workflow_id is required")
+        payload: dict[str, Any] = {"dry_run": bool(dry_run)}
+        if contact_id:
+            payload["contact_id"] = contact_id
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/test-run",
+            op="salesshift.test_run_workflow", target="infinity", json_body=payload)
+
+    def enroll_in_workflow(self, workflow_id: str,
+                           contact_ids: list[str]) -> dict[str, Any]:
+        """One run per contact. The workflow must be active — enrolling into a
+        draft is refused, not queued."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.enroll_in_workflow",
+                                    "workflow_id is required")
+        if not contact_ids:
+            raise VxValidationError("salesshift.enroll_in_workflow",
+                                    "contact_ids is required")
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/enroll",
+            op="salesshift.enroll_in_workflow", target="infinity",
+            json_body={"contact_ids": list(contact_ids)})
+
+    def workflow_runs(self, workflow_id: str) -> list[dict[str, Any]]:
+        """Recent runs for a workflow."""
+        if not workflow_id:
+            raise VxValidationError("salesshift.workflow_runs",
+                                    "workflow_id is required")
+        out = self.client._json(
+            "GET",
+            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/runs",
+            op="salesshift.workflow_runs", target="infinity")
+        return out.get("data", []) if isinstance(out, dict) else []
+
+    # ── sequences: multi-step outbound ──
+
+    def list_sequences(self, *, q: str = "", status: str = "",
+                       include_archived: bool = False) -> dict[str, Any]:
+        """Sequences with their real funnel, plus workspace totals."""
+        from urllib.parse import quote
+        pairs = []
+        if q:
+            pairs.append(f"q={quote(q)}")
+        if status:
+            pairs.append(f"status={quote(status)}")
+        if include_archived:
+            pairs.append("include_archived=true")
+        url = self.client.infinity_url + "/api/v1/salesshift/sequences"
+        if pairs:
+            url += "?" + "&".join(pairs)
+        return self.client._json("GET", url, op="salesshift.list_sequences",
+                                 target="infinity")
+
+    def get_sequence(self, sequence_id: str) -> dict[str, Any]:
+        """One sequence with its step timeline. List rows carry
+        ``steps_count`` but an empty ``steps`` — only this call hydrates it."""
+        if not sequence_id:
+            raise VxValidationError("salesshift.get_sequence", "sequence_id is required")
+        out = self.client._json(
+            "GET", f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}",
+            op="salesshift.get_sequence", target="infinity")
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def create_sequence(self, name: str, *, description: str = "",
+                        stop_on_reply: bool = True,
+                        steps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Create a sequence, optionally with its steps in the same call.
+
+        Each step is ``{"step_type": "email", "subject": ..., "body_html": ...,
+        "delay_days": N}``; delays are measured from the previous step, not
+        from enrollment.
+        """
+        if not name:
+            raise VxValidationError("salesshift.create_sequence", "name is required")
+        payload: dict[str, Any] = {"name": name, "stop_on_reply": bool(stop_on_reply)}
+        if description:
+            payload["description"] = description
+        if steps:
+            payload["steps"] = [
+                {"step_number": i + 1, "step_type": s.get("step_type", "email"), **{
+                    k: v for k, v in s.items() if k not in ("step_number", "step_type")
+                }}
+                for i, s in enumerate(steps)
+            ]
+        out = self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/sequences",
+            op="salesshift.create_sequence", target="infinity", json_body=payload)
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def add_sequence_step(self, sequence_id: str, *, subject: str = "",
+                          body_html: str = "", delay_days: int = 0,
+                          step_type: str = "email") -> dict[str, Any]:
+        """Append a step to an existing sequence."""
+        if not sequence_id:
+            raise VxValidationError("salesshift.add_sequence_step",
+                                    "sequence_id is required")
+        payload = {"step_type": step_type, "delay_days": int(delay_days)}
+        if subject:
+            payload["subject"] = subject
+        if body_html:
+            payload["body_html"] = body_html
+        out = self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/steps",
+            op="salesshift.add_sequence_step", target="infinity", json_body=payload)
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def _sequence_action(self, sequence_id: str, action: str) -> dict[str, Any]:
+        if not sequence_id:
+            raise VxValidationError(f"salesshift.{action}_sequence",
+                                    "sequence_id is required")
+        out = self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/{action}",
+            op=f"salesshift.{action}_sequence", target="infinity", json_body={})
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def activate_sequence(self, sequence_id: str) -> dict[str, Any]:
+        """Start dispatching due steps."""
+        return self._sequence_action(sequence_id, "activate")
+
+    def pause_sequence(self, sequence_id: str) -> dict[str, Any]:
+        """Hold all sends. Enrollments keep their position."""
+        return self._sequence_action(sequence_id, "pause")
+
+    def archive_sequence(self, sequence_id: str) -> dict[str, Any]:
+        """Hide a sequence from the default list."""
+        return self._sequence_action(sequence_id, "archive")
+
+    def enroll_in_sequence(self, sequence_id: str,
+                           contact_ids: list[str]) -> dict[str, Any]:
+        """Enroll contacts by id.
+
+        The suppression list is a hard gate: suppressed, unsubscribed,
+        address-less and already-enrolled contacts are skipped, never queued,
+        and each skip comes back in ``skipped_details`` with its reason.
+        """
+        if not sequence_id:
+            raise VxValidationError("salesshift.enroll_in_sequence",
+                                    "sequence_id is required")
+        if not contact_ids:
+            raise VxValidationError("salesshift.enroll_in_sequence",
+                                    "contact_ids is required")
+        return self.client._json(
+            "POST",
+            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/enroll",
+            op="salesshift.enroll_in_sequence", target="infinity",
+            json_body={"contact_ids": list(contact_ids)})
+
+    def sequence_enrollments(self, sequence_id: str) -> list[dict[str, Any]]:
+        """Who is enrolled and where they are in the sequence."""
+        if not sequence_id:
+            raise VxValidationError("salesshift.sequence_enrollments",
+                                    "sequence_id is required")
+        out = self.client._json(
+            "GET",
+            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/enrollments",
+            op="salesshift.sequence_enrollments", target="infinity")
+        return out.get("data", []) if isinstance(out, dict) else []
+
+    def sequence_analytics(self, sequence_id: str) -> dict[str, Any]:
+        """Per-step funnel for a sequence.
+
+        Shape note: ``enrolled`` sits at the top level but the counters do
+        NOT — ``sent``/``opened``/``clicked``/``replied``/``bounced`` and their
+        rates live under ``totals``. Reading them beside ``enrolled`` returns
+        None on a sequence that has really sent mail::
+
+            a = ss.sequence_analytics(sid)
+            a["enrolled"]           # 4
+            a["totals"]["sent"]     # 8   (a.get("sent") is None)
+
+        Per-step rows are in ``steps``, each labelled ``name`` (not ``subject``).
+        """
+        if not sequence_id:
+            raise VxValidationError("salesshift.sequence_analytics",
+                                    "sequence_id is required")
+        out = self.client._json(
+            "GET",
+            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/analytics",
+            op="salesshift.sequence_analytics", target="infinity")
+        return out.get("data", out) if isinstance(out, dict) else {}
+
+    def dispatch_sequences_now(self) -> dict[str, Any]:
+        """Force this tenant's due steps to run now rather than waiting for the
+        scheduler. The scheduler still owns the normal cadence."""
+        return self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/sequences/dispatch-now",
+            op="salesshift.dispatch_sequences_now", target="infinity", json_body={})
+
+
 class Client:
     """Entry point. Construct with explicit credentials or load from vxcli."""
 
@@ -3818,6 +5515,7 @@ class Client:
 
         self._lock = threading.RLock()
         self._whoami = Whoami(username=username or "")
+        self._user_id_cache: str | None = None
 
         # Resource modules
         self.cicd = CICD(self)
@@ -3831,6 +5529,8 @@ class Client:
         self.connector = Connector(self)
         self.metaldb = MetalDB(self)
         self.nodes = Nodes(self)
+        self.sandboxes = Sandboxes(self)
+        self.salesshift = SalesShift(self)
         self.services = Services(self)
         self.networks = Networks(self)
         self.agents = Agents(self)
@@ -3868,8 +5568,18 @@ class Client:
         return self._whoami
 
     def authenticate(self) -> None:
-        """Eagerly exchange the API key for a fresh JWT pair. Optional —
-        the client refreshes lazily on the first 401."""
+        """Make sure the client holds a usable JWT. Optional — the client also
+        refreshes lazily on the first 401.
+
+        A password login (``vxcli auth login --username … --password …``)
+        writes an access token but no API key. Calling ``_refresh()``
+        unconditionally therefore threw away a perfectly good token from
+        ``load_from_vxcli()`` and failed with "no api key configured", which
+        made the SDK unusable for exactly the users who had just logged in.
+        Refresh only when there is nothing usable to hold on to.
+        """
+        if self.access_token and not _jwt_expired(self.access_token):
+            return
         self._refresh()
 
     def ensure_node_url(self) -> str:
@@ -3911,6 +5621,36 @@ class Client:
         with self._lock:
             self.node_url = url.rstrip("/")
         return self.node_url
+
+    def auth_user_id(self) -> str:
+        """Return the authenticated user's numeric/string id.
+
+        Some node routes (notably the workflow builder — /api/v2/workflow/*)
+        require a ``user_id`` query parameter, which they read from the caller
+        rather than the JWT. vxcli derives it from the access-token ``user_id``
+        claim (services/cli/cmd/cicd.go authUserIDStr); the SDK mirrors that so
+        ``client.workflow.*`` works without the caller passing it. Returns ""
+        when no access token / claim is available. Cached after first decode.
+        """
+        with self._lock:
+            if self._user_id_cache is not None:
+                return self._user_id_cache
+            token = self.access_token
+        uid = ""
+        if token:
+            try:
+                parts = token.split(".")
+                if len(parts) == 3:
+                    pad = parts[1] + "=" * (-len(parts[1]) % 4)
+                    import base64
+                    claims = json.loads(base64.urlsafe_b64decode(pad))
+                    raw = claims.get("user_id") or claims.get("uid") or claims.get("id") or ""
+                    uid = str(raw) if raw != "" else ""
+            except Exception:
+                uid = ""
+        with self._lock:
+            self._user_id_cache = uid
+        return uid
 
     # ── internal: HTTP machinery ──
 

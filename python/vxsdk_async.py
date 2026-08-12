@@ -40,18 +40,31 @@ import asyncio
 import json
 import urllib.parse
 import uuid
-from typing import Any, Iterable
+from typing import Any, AsyncIterator, Iterable
 
 import httpx
 
 from vxsdk import (
     DEFAULT_INFINITY_URL, DEFAULT_LONG_TIMEOUT, DEFAULT_TIMEOUT,
-    STACK_TARGETS, VxAuthError, VxError, VxNetworkError,
+    STACK_TARGETS, VxAuthError, VxError, VxNetworkError, VxValidationError,
     Whoami, _from_http, _http_reason, _is_retryable, _load_credentials_file,
     _multipart_body, __version__,
+    # Leads errors live in vxsdk so BOTH flavors raise the SAME class —
+    # re-declaring them here would mean `except VxLeadQuotaExhaustedError`
+    # written against the sync client silently fails to catch the async one.
+    VxLeadQuotaExhaustedError, VxLeadErasedError,
 )
 
-__all__ = ["AsyncClient", "VxCloud", "vxcloud"]
+__all__ = [
+    "AsyncClient", "VxCloud", "vxcloud",
+    "VxLeadQuotaExhaustedError", "VxLeadErasedError",
+]
+
+
+#: The literal the server masks with (``j•••@acme.com``). Three U+2022 BULLET
+#: characters, written as escapes so the comparison cannot be broken by a
+#: file-encoding accident somewhere in the toolchain.
+_EMAIL_MASK_MARK = "•••"
 
 
 # ── Resource modules ───────────────────────────────────────────────────
@@ -1158,6 +1171,588 @@ class _AsyncWorkspace(_AsyncResource):
         )
 
 
+# ── Async SalesShift — tracked email + the global leads pool ───────────
+
+class _AsyncSalesShift(_AsyncResource):
+    """Async equivalent of vxsdk.SalesShift — tracked email plus the whole
+    leads-pool surface described in ``salesshift/doc/LEADS_CLIENT_CONTRACT.md``.
+
+    Two halves, and the line between them is the most important thing here:
+
+    * **email / stats** — operates on *Contacts*. Mailable. ``send_email``
+      puts a real message on the wire through the org's BYOK provider.
+    * **leads** — the global pool. **NOT mailable.** A lead is a scraped or
+      purchased record carrying no consent metadata. The only route from a
+      lead to something you may send to is :meth:`convert_lead` /
+      :meth:`convert_from_pool`, which creates a Contact and is where consent
+      is written. Never pass a lead — or a lead's address — into
+      :meth:`send_email` or any sequence/campaign call; a scraped record
+      entering a sending path is how a tenant's sending domain dies.
+
+    Two more rules this class is built around:
+
+    * **An unrevealed address is a mask** (``j•••@acme.com``), not an address.
+      ``has_email`` says an address EXISTS; ``email_revealed`` says whether you
+      may see it. Never render a mask as if it were real, never let it be
+      copied as one. :meth:`send_email` refuses one outright.
+    * **Reveal spends metered quota.** :meth:`reveal_lead` and
+      :meth:`convert_from_pool` (with ``reveal_if_needed=True``) both charge.
+      Show :meth:`reveal_quota` before a batch and :meth:`describe_convert`
+      after one.
+
+    Base URLs: every leads endpoint is on the **Infinity control plane**
+    (``/api/v1/salesshift/*``), never on the tenant node — so each URL below is
+    built from ``client.infinity_url`` explicitly, exactly as the email methods
+    do. Only :meth:`get_worker_health` talks to the node.
+    """
+
+    #: `POST /leads/save` and `POST /leads/convert-from-pool` both cap here.
+    #: Enforced client-side too: convert-from-pool reveals, so an oversized
+    #: batch that 400s after the caller has already assembled 500 ids is a
+    #: worse experience than being told before the round trip.
+    MAX_BATCH = 200
+    #: `POST /leads/search` clamps to this server-side; mirrored so a caller
+    #: asking for 500 gets 100 rows and a documented reason, not a surprise.
+    MAX_PAGE_SIZE = 100
+    #: `GET /leads` (saved leads) caps here.
+    MAX_LIST_LIMIT = 500
+
+    # ── email ──
+
+    async def send_email(self, to_email: str, subject: str, body_html: str, *,
+                         first_name: str = "", last_name: str = "") -> dict[str, Any]:
+        """Send one tracked email. Merge tags like ``{{first_name}}`` resolve
+        against the contact record; suppressed recipients are rejected.
+
+        ``to_email`` must be a **Contact** address. Passing a pool lead here is
+        the single most expensive mistake this SDK can make — leads carry no
+        consent, so convert first. A masked address is rejected below rather
+        than delivered to a mailbox that does not exist.
+        """
+        if not to_email or not subject or not body_html:
+            raise VxValidationError("salesshift.send_email",
+                                    "to_email, subject and body_html are required")
+        if _EMAIL_MASK_MARK in to_email:
+            raise VxValidationError(
+                "salesshift.send_email",
+                f"{to_email!r} is a MASKED pool address, not a real one — reveal "
+                "the lead and convert it to a Contact before sending")
+        payload: dict[str, Any] = {
+            "to_email": to_email, "subject": subject, "body_html": body_html,
+        }
+        if first_name:
+            payload["first_name"] = first_name
+        if last_name:
+            payload["last_name"] = last_name
+        return await self.client._json(
+            "POST", self.client.infinity_url + "/api/v1/salesshift/email/send",
+            op="salesshift.send_email", json_body=payload,
+        )
+
+    async def list_emails(self, status: str = "") -> list[dict[str, Any]]:
+        """Tracked outbound emails with engagement state (opens/clicks/replies)."""
+        url = self.client.infinity_url + "/api/v1/salesshift/emails"
+        if status:
+            url += f"?status={urllib.parse.quote(status)}"
+        body = await self.client._json("GET", url, op="salesshift.list_emails")
+        return list(body.get("data") or [])
+
+    async def get_stats(self) -> dict[str, Any]:
+        """Live dashboard stats (contacts, deals, email funnel)."""
+        return await self.client._json(
+            "GET", self.client.infinity_url + "/api/v1/salesshift/stats",
+            op="salesshift.get_stats",
+        )
+
+    async def get_worker_health(self) -> dict[str, Any]:
+        """Health of the tenant-node Go email worker (:8744).
+
+        The one method here that is node-scoped, so it needs ``node_url`` on the
+        client (set it explicitly or load it from vxcli).
+        """
+        if not self.client.node_url:
+            raise VxError("salesshift.get_worker_health",
+                          "no node_url configured — pass node_url= to AsyncClient "
+                          "or use AsyncClient.load_from_vxcli()")
+        return await self.client._json(
+            "GET", self.client.node_url + "/api/v2/salesshift/email/health",
+            op="salesshift.get_worker_health",
+        )
+
+    # ── leads: transport ──
+
+    def _leads_url(self, path: str) -> str:
+        """Absolute Infinity URL. Leads never resolve against ``node_url``."""
+        return self.client.infinity_url + "/api/v1/salesshift" + path
+
+    async def _leads(self, method: str, path: str, *, op: str,
+                     json_body: Any | None = None) -> Any:
+        """One call, with 402 and 410 promoted to types callers can branch on."""
+        try:
+            return await self.client._json(method, self._leads_url(path),
+                                           op=op, json_body=json_body)
+        except VxError as exc:
+            if exc.http_status == 402:
+                raise VxLeadQuotaExhaustedError(
+                    exc.op, "reveal allowance spent — nothing was charged for "
+                            "this attempt", exc.http_status, exc.detail) from exc
+            if exc.http_status == 410:
+                raise VxLeadErasedError(
+                    exc.op, "this person was erased at their own request — "
+                            "terminal, and not retryable",
+                    exc.http_status, exc.detail) from exc
+            raise
+
+    @staticmethod
+    def _ids(op: str, field: str, ids: Iterable[str], *,
+             cap: int | None = None) -> list[str]:
+        """Normalise an id batch. ``cap`` only where the SERVER caps — this
+        must not invent a limit the API does not have."""
+        out = [str(i) for i in (ids or []) if str(i)]
+        if not out:
+            raise VxValidationError(op, f"{field} is required")
+        if cap is not None and len(out) > cap:
+            raise VxValidationError(op, f"max {cap} per call — got {len(out)}")
+        return out
+
+    # ── leads: the pool ──
+
+    async def search_leads(self, filters: dict[str, Any] | None = None, *,
+                           result_type: str = "person", cursor: str = "",
+                           limit: int = 25, sort_field: str = "",
+                           sort_desc: bool = True) -> dict[str, Any]:
+        """Search the global pool. Returns the ``data`` envelope:
+        ``items``, ``total``, ``total_display``, ``total_is_estimate``,
+        ``next_cursor``, ``search_backend`` and ``sort``.
+
+        Three things the caller must get right:
+
+        * **Render ``data["sort"]``, not the sort you asked for.** An unknown
+          field degrades to ``score`` desc server-side, silently. The echo is
+          the sort that was actually applied.
+        * **``total`` is capped at 10,000.** When ``total_is_estimate`` is true
+          render ``total_display`` (``"10,000+"``) — never the raw number.
+        * **``next_cursor`` is opaque.** Do not parse it, do not build one, and
+          do not carry one across a sort or filter change: a keyset position is
+          only meaningful inside the ordering it came from, so reusing it after
+          a re-sort compares the wrong column and silently drops or repeats
+          rows. Start a changed search from ``cursor=""``.
+
+        Every address in ``items`` is masked unless that row's
+        ``email_revealed`` is true. ``limit`` is clamped to
+        :attr:`MAX_PAGE_SIZE`, matching the server.
+        """
+        if result_type not in ("person", "company"):
+            raise VxValidationError("salesshift.search_leads",
+                                    "result_type must be 'person' or 'company'")
+        body: dict[str, Any] = {
+            "filters": dict(filters or {}),
+            "result_type": result_type,
+            "cursor": cursor or "",
+            "limit": max(1, min(int(limit), self.MAX_PAGE_SIZE)),
+        }
+        if sort_field:
+            body["sort"] = {"field": sort_field, "desc": bool(sort_desc)}
+        out = await self._leads("POST", "/leads/search",
+                                op="salesshift.search_leads", json_body=body)
+        return out.get("data") or {}
+
+    async def search_all_leads(self, filters: dict[str, Any] | None = None, *,
+                               result_type: str = "person",
+                               page_size: int = MAX_PAGE_SIZE,
+                               sort_field: str = "", sort_desc: bool = True,
+                               max_pages: int = 100
+                               ) -> AsyncIterator[dict[str, Any]]:
+        """Walk :meth:`search_leads` to exhaustion, yielding one item at a time.
+
+        Follows ``next_cursor`` until the server stops issuing one. Filters and
+        sort are snapshotted at the first page and held fixed for the whole
+        walk — that is not a convenience, it is the cursor rule: a keyset
+        position taken under one ordering is meaningless under another.
+
+        **Bounded.** Stops after ``max_pages`` pages even if a cursor remains.
+        The default of 100 pages x 100 rows is 10,000 — the same ceiling the
+        server counts to — so an unfiltered walk cannot become an unbounded
+        crawl of the pool. Raise it deliberately, or narrow ``filters``.
+
+        Reads nothing metered: every address yielded is still masked unless
+        this org has already revealed that row. Iterating does not spend quota.
+
+        Example::
+
+            async for lead in c.salesshift.search_all_leads(
+                    {"seniorities": ["director"], "countries": ["AU"]},
+                    sort_field="score"):
+                print(lead["full_name"], lead["email"])   # may be j•••@acme.com
+        """
+        if max_pages < 1:
+            raise VxValidationError("salesshift.search_all_leads",
+                                    "max_pages must be at least 1")
+        pinned = dict(filters or {})
+        cursor = ""
+        seen: set[str] = set()
+        for _ in range(max_pages):
+            page = await self.search_leads(
+                pinned, result_type=result_type, cursor=cursor,
+                limit=page_size, sort_field=sort_field, sort_desc=sort_desc)
+            for item in (page.get("items") or []):
+                yield item
+            cursor = page.get("next_cursor") or ""
+            # A cursor that does not advance means the page is repeating —
+            # keep walking and this becomes an infinite loop that also spends
+            # the caller's rate budget.
+            if not cursor or cursor in seen:
+                return
+            seen.add(cursor)
+
+    async def lead_facets(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Counts per seniority / department / country / email_status for the
+        given filters. Pool-wide and tenant-blind — the number of Directors in
+        the pool is the same for every org — so nothing here is masked or
+        metered."""
+        out = await self._leads("POST", "/leads/facets",
+                                op="salesshift.lead_facets",
+                                json_body={"filters": dict(filters or {})})
+        return out.get("data") or {}
+
+    async def reveal_quota(self) -> dict[str, Any]:
+        """``{used, allowance, remaining, display}`` for the current period.
+
+        Free to call. Show it **before** any batch that reveals — that is the
+        only moment the cost of :meth:`convert_from_pool` is still avoidable.
+        """
+        out = await self._leads("GET", "/leads/quota", op="salesshift.reveal_quota")
+        return out.get("data") or {}
+
+    async def reveal_lead(self, pool_person_id: str) -> dict[str, Any]:
+        """Un-mask one person. **Spends one reveal from the metered allowance**
+        (free if this org already revealed this row).
+
+        Returns ``{pool_id, email, phone, linkedin_url, quota}`` — the returned
+        ``quota`` is authoritative; render it rather than decrementing a local
+        counter.
+
+        Raises :class:`VxLeadQuotaExhaustedError` (402) when the allowance is
+        spent — **nothing was charged**; :class:`VxLeadErasedError` (410) when
+        the person was erased, which is terminal; and ``VxNotFoundError`` (404)
+        when the id is not in the pool.
+        """
+        if not pool_person_id:
+            raise VxValidationError("salesshift.reveal_lead",
+                                    "pool_person_id is required")
+        out = await self._leads("POST", "/leads/reveal",
+                                op="salesshift.reveal_lead",
+                                json_body={"pool_person_id": str(pool_person_id)})
+        return out.get("data") or {}
+
+    async def save_leads(self, pool_person_ids: Iterable[str]) -> dict[str, Any]:
+        """Copy pool rows into this org's saved leads. Max 200 per call.
+
+        A **snapshot**, not a reference: the pool is re-crawled continuously and
+        a saved list must not mutate under the person who qualified it. Saving
+        is free and reveals nothing — a row saved while masked keeps
+        ``email=null`` until it is revealed.
+
+        Returns the flat ``{success, saved, already_saved}`` body.
+        """
+        ids = self._ids("salesshift.save_leads", "pool_person_ids",
+                        pool_person_ids, cap=self.MAX_BATCH)
+        return await self._leads("POST", "/leads/save",
+                                 op="salesshift.save_leads",
+                                 json_body={"pool_person_ids": ids})
+
+    async def get_pool_person(self, pool_id: str) -> dict[str, Any]:
+        """Full detail for one pool person, plus this org's relationship to
+        them (``email_revealed``, ``saved_lead_id``, ``existing_contact_id``).
+
+        Masking applies exactly as it does in search — a detail view is not a
+        back door around the meter. Raises :class:`VxLeadErasedError` on 410.
+        """
+        if not pool_id:
+            raise VxValidationError("salesshift.get_pool_person",
+                                    "pool_id is required")
+        out = await self._leads("GET", f"/leads/pool/{urllib.parse.quote(str(pool_id))}",
+                                op="salesshift.get_pool_person")
+        return out.get("data") or {}
+
+    async def get_pool_company(self, company_id: str) -> dict[str, Any]:
+        """A pool company with its people split into ``new_prospects`` and
+        ``existing_contacts`` — what is left to work versus what this org
+        already owns, so nobody re-buys a record they have."""
+        if not company_id:
+            raise VxValidationError("salesshift.get_pool_company",
+                                    "company_id is required")
+        out = await self._leads("GET", f"/leads/company/{urllib.parse.quote(str(company_id))}",
+                                op="salesshift.get_pool_company")
+        return out.get("data") or {}
+
+    # ── leads: the tenant's saved copies ──
+
+    async def list_leads(self, status: str = "", *, limit: int = 100) -> list[dict[str, Any]]:
+        """This org's saved leads. Still not mailable.
+
+        Each row carries both ``email`` (null until revealed) and
+        ``email_masked`` + ``has_email`` from the live pool row, so a lead saved
+        before being revealed reads as "not paid for yet" rather than "has no
+        address" — the difference between a good prospect and a skipped one.
+        """
+        q: dict[str, Any] = {"limit": max(1, min(int(limit), self.MAX_LIST_LIMIT))}
+        if status:
+            q["status"] = status
+        out = await self._leads("GET", "/leads?" + urllib.parse.urlencode(q),
+                                op="salesshift.list_leads")
+        return list(out.get("data") or [])
+
+    async def get_lead(self, lead_id: str) -> dict[str, Any]:
+        """One saved lead, the live pool row behind it (``pool``), and ``drift``
+        — the fields that have changed since the snapshot was taken. A non-empty
+        ``drift`` is the warning you want before working the list, not after a
+        bounce."""
+        if not lead_id:
+            raise VxValidationError("salesshift.get_lead", "lead_id is required")
+        out = await self._leads("GET", f"/leads/{urllib.parse.quote(str(lead_id))}",
+                                op="salesshift.get_lead")
+        return out.get("data") or {}
+
+    async def update_lead(self, lead_id: str, *, status: str | None = None,
+                          score: int | None = None, notes: str | None = None,
+                          tags: list[str] | None = None,
+                          disqualify_reason: str | None = None,
+                          owner_id: str | None = None) -> dict[str, Any]:
+        """Patch a saved lead. Only the arguments you pass are sent — ``None``
+        means "leave it alone", never "clear it"."""
+        if not lead_id:
+            raise VxValidationError("salesshift.update_lead", "lead_id is required")
+        patch: dict[str, Any] = {}
+        for key, value in (("status", status), ("score", score), ("notes", notes),
+                           ("tags", tags), ("disqualify_reason", disqualify_reason),
+                           ("owner_id", owner_id)):
+            if value is not None:
+                patch[key] = value
+        if not patch:
+            raise VxValidationError("salesshift.update_lead",
+                                    "nothing to update — pass at least one field")
+        out = await self._leads("PATCH", f"/leads/{urllib.parse.quote(str(lead_id))}",
+                                op="salesshift.update_lead", json_body=patch)
+        return out.get("data") or {}
+
+    # ── leads: convert — the one-way gate into mailable Contacts ──
+
+    async def convert_lead(self, lead_id: str, *,
+                           lifecycle_stage: str = "lead") -> dict[str, Any]:
+        """Saved lead → Contact. **The moment a record becomes mailable**, and
+        the only supported route there: this is where consent metadata is
+        written, which is why nothing else may feed a sending path.
+
+        The lead row is kept as an audit trail, never moved. Returns the flat
+        body: ``{success, contact_id, reused_existing_contact}``, or
+        ``{success, already_converted: true, contact_id}`` when it had already
+        been converted — check ``already_converted`` before reporting a new one.
+
+        400 (``VxValidationError``) means either "reveal the address first" or
+        "this record was erased and cannot be converted" — the ``detail`` says
+        which, so surface it verbatim rather than as a generic failure.
+        """
+        if not lead_id:
+            raise VxValidationError("salesshift.convert_lead", "lead_id is required")
+        return await self._leads(
+            "POST", f"/leads/{urllib.parse.quote(str(lead_id))}/convert",
+            op="salesshift.convert_lead",
+            json_body={"lifecycle_stage": lifecycle_stage})
+
+    async def bulk_convert_leads(self, lead_ids: Iterable[str]) -> dict[str, Any]:
+        """Many saved leads → Contacts.
+
+        Spends no quota — it converts only leads whose address this org already
+        owns. Returns ``{success, converted, skipped_no_email,
+        already_converted}``; render every bucket, not just ``converted``.
+        :meth:`describe_convert` does that for you.
+        """
+        # No cap: the server does not impose one here, and inventing a
+        # client-side limit would reject a batch the API would have accepted.
+        ids = self._ids("salesshift.bulk_convert_leads", "lead_ids", lead_ids)
+        return await self._leads("POST", "/leads/bulk-convert",
+                                 op="salesshift.bulk_convert_leads",
+                                 json_body={"lead_ids": ids})
+
+    async def convert_from_pool(self, pool_person_ids: Iterable[str], *,
+                                reveal_if_needed: bool = True,
+                                lifecycle_stage: str = "lead") -> dict[str, Any]:
+        """Pool → Contact in one step: save, reveal if needed, convert. Max 200.
+
+        **This spends metered quota**, one reveal per not-yet-revealed id, up to
+        the remaining allowance. Call :meth:`reveal_quota` first and show the
+        user what the batch will cost — the cost is only avoidable before the
+        call. Pass ``reveal_if_needed=False`` to convert only rows already
+        revealed and spend nothing; the rest come back as ``skipped_no_quota``.
+
+        The response **accounts for every id passed in**::
+
+            converted, revealed_now, already_converted,
+            skipped_no_quota, skipped_no_email, skipped_erased,
+            contact_ids, quota
+
+        Printing only ``converted`` hides a partial spend, which is exactly how
+        trust in the meter is lost. Pass the whole report to
+        :meth:`describe_convert`.
+
+        When the allowance runs out mid-batch the server converts what it can
+        and reports the rest — it does not raise 402. A 402 here would mean the
+        request was refused outright.
+        """
+        ids = self._ids("salesshift.convert_from_pool", "pool_person_ids",
+                        pool_person_ids, cap=self.MAX_BATCH)
+        return await self._leads("POST", "/leads/convert-from-pool",
+                                 op="salesshift.convert_from_pool",
+                                 json_body={"pool_person_ids": ids,
+                                            "reveal_if_needed": bool(reveal_if_needed),
+                                            "lifecycle_stage": lifecycle_stage})
+
+    @staticmethod
+    def describe_convert(report: dict[str, Any]) -> str:
+        """Render a convert report so **every** id is accounted for.
+
+        Takes the body of :meth:`convert_from_pool` or
+        :meth:`bulk_convert_leads` and returns lines a human can read. Every
+        non-zero outcome is listed, never just the successes: a partial spend
+        reported as a success is the failure mode rule 4 of the client contract
+        exists to prevent. Buckets the endpoint did not return are omitted, and
+        a zeroed report still says so explicitly rather than printing nothing.
+
+        Example::
+
+            report = await c.salesshift.convert_from_pool(ids)
+            print(c.salesshift.describe_convert(report))
+            # 4 converted, 1 already a contact, 2 skipped: no reveal quota left
+            # 4 reveals spent. Quota now 7 / 200 (193 left).
+        """
+        report = report or {}
+        labels = [
+            ("converted", "{n} converted"),
+            ("already_converted", "{n} already a contact"),
+            ("skipped_no_quota", "{n} skipped: no reveal quota left"),
+            ("skipped_no_email", "{n} skipped: no email address on record"),
+            ("skipped_erased", "{n} skipped: erased at the person's request"),
+        ]
+        parts = [tpl.format(n=int(report.get(key) or 0))
+                 for key, tpl in labels
+                 if key in report and int(report.get(key) or 0) > 0]
+        lines = [", ".join(parts) if parts else "Nothing converted — 0 of 0."]
+
+        revealed = int(report.get("revealed_now") or 0)
+        if revealed:
+            lines.append(f"{revealed} reveal{'s' if revealed != 1 else ''} spent.")
+        quota = report.get("quota") or {}
+        if quota:
+            display = (quota.get("display")
+                       or f"{quota.get('used')} / {quota.get('allowance')}")
+            lines.append(f"Quota now {display} ({quota.get('remaining')} left).")
+        return "\n".join(lines)
+
+    # ── leads: erasure ──
+
+    async def request_erasure(self, email: str = "", *, linkedin_url: str = "",
+                              note: str = "", reason: str = "gdpr_erasure",
+                              confirm: bool = False) -> dict[str, Any]:
+        """Right to be forgotten. **Global and irreversible.**
+
+        This does not remove the person from *your* org — it deactivates them in
+        the shared pool, records a hash so no future crawl can resurrect them,
+        and strips the address from every tenant's saved copy. **Every tenant,
+        not just the caller's.** There is no undo.
+
+        Because of that, ``confirm=True`` is mandatory: an erasure must be an
+        explicit act, never something a loop does by accident. Anything you
+        build on top of this must say "all tenants" and "cannot be undone"
+        before it calls.
+
+        Identify the person by ``email`` or ``linkedin_url`` (at least one).
+        Returns ``{success, pool_rows_erased, saved_leads_flagged,
+        already_recorded}`` — ``already_recorded`` true means the erasure was
+        already on file, which is a success, not a no-op to hide.
+        """
+        if not confirm:
+            raise VxValidationError(
+                "salesshift.request_erasure",
+                "erasure is GLOBAL (every tenant, not just yours) and cannot be "
+                "undone — pass confirm=True to proceed")
+        if not email and not linkedin_url:
+            raise VxValidationError("salesshift.request_erasure",
+                                    "email or linkedin_url is required")
+        body: dict[str, Any] = {"reason": reason or "gdpr_erasure"}
+        if email:
+            body["email"] = email
+        if linkedin_url:
+            body["linkedin_url"] = linkedin_url
+        if note:
+            body["note"] = note
+        return await self._leads("POST", "/leads/erasure",
+                                 op="salesshift.request_erasure", json_body=body)
+
+    async def enrich_company(self, *, company_id: str = "", domain: str = "",
+                       ) -> dict[str, Any]:
+        """Crawl a company's own website and fold what it finds into the pool.
+
+        The only call here that WRITES to the shared pool, so what it refuses
+        to do matters as much as what it does:
+
+        * **Gaps only.** An existing description, keyword set or address is
+          never replaced by crawl output.
+        * **Erasure is checked before every insert**, so a crawl cannot bring
+          back someone who asked to be forgotten.
+        * **Shared mailboxes are not people.** ``sales@``, ``info@``,
+          ``announce@`` and their regional variants are dropped, and a name is
+          derived from an address only when the local part plausibly is one.
+        * **Everything found is unverified**, and no reveal quota is spent.
+
+        Pass ``company_id`` for a company already in the pool, or ``domain``
+        for one that is not — in which case the crawl CREATES the company and
+        any people it finds.
+
+        Read ``crawled`` in the result first. When it is 0, ``note`` says why
+        (blocked by a CDN, nothing readable, a server error) and nothing was
+        written. Slow by nature: it fetches up to a dozen pages, and the
+        server's own ceiling is 90 seconds.
+        """
+        domain = (domain or "").strip().lower()
+        for prefix in ("https://", "http://"):
+            if domain.startswith(prefix):
+                domain = domain[len(prefix):]
+        domain = domain.split("/")[0]
+        if not company_id and not domain:
+            raise VxValidationError("salesshift.enrich_company",
+                                    "company_id or domain is required")
+        body: dict[str, Any] = {}
+        if company_id:
+            body["company_id"] = company_id
+        if domain:
+            body["domain"] = domain
+        return await self._leads("POST", "/api/v1/salesshift/leads/enrich",
+                           op="salesshift.enrich_company", json_body=body)
+
+    # ── leads: saved searches ──
+
+    async def list_saved_searches(self) -> list[dict[str, Any]]:
+        """This org's saved lead searches (``{id, name, filters, is_shared}``)."""
+        out = await self._leads("GET", "/lead-searches",
+                                op="salesshift.list_saved_searches")
+        return list(out.get("data") or [])
+
+    async def save_search(self, name: str, filters: dict[str, Any] | None = None,
+                          *, is_shared: bool = False) -> dict[str, Any]:
+        """Save a filter set by name. Stores the filters only — never a cursor,
+        which is a position inside one ordering of one result set and means
+        nothing the next time the search is run."""
+        if not name or not name.strip():
+            raise VxValidationError("salesshift.save_search", "name is required")
+        out = await self._leads("POST", "/lead-searches",
+                                op="salesshift.save_search",
+                                json_body={"name": name.strip(),
+                                           "filters": dict(filters or {}),
+                                           "is_shared": bool(is_shared)})
+        return out.get("data") or {}
+
+
 # ── Async client ───────────────────────────────────────────────────────
 
 class AsyncClient:
@@ -1205,6 +1800,7 @@ class AsyncClient:
         self.vxchrono = _AsyncVxChrono(self)
         self.workspace = _AsyncWorkspace(self)
         self.workflow = _AsyncWorkflow(self)
+        self.salesshift = _AsyncSalesShift(self)
 
     @classmethod
     async def load_from_vxcli(cls) -> "AsyncClient":

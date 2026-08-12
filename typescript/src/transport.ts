@@ -174,9 +174,11 @@ export class Transport {
 
   private absoluteURL(path: string): string {
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    // /api/v1/auth/* goes to the infinity (control-plane) URL; everything
-    // else (deploys, sessions, services) goes to the active tenant node.
+    // /api/v1/auth/* and /api/v1/salesshift/* go to the infinity
+    // (control-plane) URL; everything else (deploys, sessions, services,
+    // the /api/v2/salesshift email worker) goes to the active tenant node.
     if (path.startsWith('/api/v1/auth/')) return this.infinityURL + path;
+    if (path.startsWith('/api/v1/salesshift/')) return this.infinityURL + path;
     return this.nodeURL + path;
   }
 

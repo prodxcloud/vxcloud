@@ -23,11 +23,20 @@ import { Transport } from './transport.js';
 import { Agents } from './agents.js';
 import { AgentControl } from './agentcontrol.js';
 import { Billing } from './billing.js';
+import { SalesShift } from './salesshift.js';
+import {
+  SalesShiftBilling, SalesShiftSocial, SalesShiftOpportunities,
+  SalesShiftTasks, SalesShiftCampaigns,
+} from './salesshift-platform.js';
+import {
+  SalesShiftContacts, SalesShiftWorkflows, SalesShiftSequences,
+} from './salesshift-crm.js';
 import { Chat } from './chat.js';
 import { CICD } from './cicd.js';
 import { Cloud } from './cloud.js';
 import { Deploy } from './deploy.js';
 import { Install } from './install.js';
+import { Leads } from './leads.js';
 import { Marketplace } from './marketplace.js';
 import { MetalDB } from './metaldb.js';
 import { Networks } from './networks.js';
@@ -45,7 +54,7 @@ import { WebScraper } from './webscraper.js';
 import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.6.15';
+export const VERSION = '2026.8.13';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */
@@ -78,11 +87,29 @@ export class VxCloud {
   readonly agents: Agents;
   readonly agentcontrol: AgentControl;
   readonly billing: Billing;
+  readonly salesshift: SalesShift;
+  /** CRM contacts — the only records that are mailable. */
+  readonly contacts: SalesShiftContacts;
+  /** The /automations canvas: build, validate, test-run, enroll. */
+  readonly workflows: SalesShiftWorkflows;
+  /** Multi-step outbound with delays and stop-on-reply. */
+  readonly sequences: SalesShiftSequences;
+  /** What the workspace pays for. Distinct from `billing`, which is the
+   *  cloud-spend surface — these two bill in opposite directions. */
+  readonly salesshiftBilling: SalesShiftBilling;
+  readonly social: SalesShiftSocial;
+  readonly opportunities: SalesShiftOpportunities;
+  readonly tasks: SalesShiftTasks;
+  readonly campaigns: SalesShiftCampaigns;
   readonly chat: Chat;
   readonly cicd: CICD;
   readonly cloud: Cloud;
   readonly deploy: Deploy;
   readonly install: Install;
+  /** Prospect pool + saved leads. Deliberately separate from `salesshift`
+   *  (the send surface): leads are NOT mailable until `convertLead` /
+   *  `convertFromPool` turns one into a Contact. */
+  readonly leads: Leads;
   readonly marketplace: Marketplace;
   readonly metaldb: MetalDB;
   readonly networks: Networks;
@@ -132,11 +159,21 @@ export class VxCloud {
     this.agents = new Agents(this.t);
     this.agentcontrol = new AgentControl(this.t, () => this.tenantId);
     this.billing = new Billing(this.t);
+    this.salesshift = new SalesShift(this.t);
+    this.contacts = new SalesShiftContacts(this.t);
+    this.workflows = new SalesShiftWorkflows(this.t);
+    this.sequences = new SalesShiftSequences(this.t);
+    this.salesshiftBilling = new SalesShiftBilling(this.t);
+    this.social = new SalesShiftSocial(this.t);
+    this.opportunities = new SalesShiftOpportunities(this.t);
+    this.tasks = new SalesShiftTasks(this.t);
+    this.campaigns = new SalesShiftCampaigns(this.t);
     this.chat = new Chat(this.t);
     this.cicd = new CICD(this.t);
     this.cloud = new Cloud(this.t);
     this.deploy = new Deploy(this.t);
     this.install = new Install(this.t);
+    this.leads = new Leads(this.t);
     this.marketplace = new Marketplace(this.t);
     this.metaldb = new MetalDB(this.t, () => this.username);
     this.networks = new Networks(this.t);

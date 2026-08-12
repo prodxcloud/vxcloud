@@ -7,6 +7,12 @@ __pycache__/
 .pytest_cache/
 *.whl
 *.tar.gz
+*.tgz
+
+# compiled Java classes (javac -d out) and the Maven target/ tree
+java/out/
+target/
+*.class
 
 # compiled example binaries
 examples/*/vxsdkexample
@@ -18,6 +24,18 @@ examples/**/*.exe
 BIG_PLAN.md
 BIG_PLAN_AGENTCONTROL.md
 PARITY.md
+
+# Live AgentControl E2E harnesses. Internal-only for two reasons: they are
+# hardwired to a dev box (localhost:8741 FastAPI + localhost:8744 node, one
+# fixed tenant UUID) so they cannot run for anyone else, and they carry real
+# login credentials inline. The published examples are examples/Example.java
+# and examples/example.cpp, which take everything from env.
+typescript/e2e_agentcontrol.mjs
+python/ac_e2e.py
+python/ac_serving_pipelines.py
+cpp/run_ac_test.sh
+cpp/examples/ac_test.cpp
+java/examples/AgentControlTest.java
 
 # not for the public SDK repo
 .github/

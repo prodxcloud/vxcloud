@@ -2,9 +2,9 @@
 
 # 📦 vxcloud SDK
 
-### Go · Python · TypeScript — one wire contract, three first-class SDKs
+### Go · Python · TypeScript · C++ · Java — one wire contract, five SDKs
 
-**The multi-cloud SDK & framework for developers — program your cloud in Go, Python, or TypeScript.**
+**The multi-cloud SDK & framework for developers — program your cloud in Go, Python, TypeScript, C++, or Java.**
 <br />
 Provision infrastructure as code — VMs, databases, Kubernetes, and serverless — across AWS, Azure, Google Cloud, Alibaba, Oracle, DigitalOcean & Linode.
 <br />
@@ -26,6 +26,8 @@ One wire contract, three first-class SDKs — no vendor lock-in, full multi-clou
 | **TypeScript / Node** | `npm install @vxcloud/sdk` | [![npm](https://img.shields.io/npm/v/%40vxcloud%2Fsdk?label=version&color=CB3837)](https://www.npmjs.com/package/@vxcloud/sdk) |
 | **Python** | `pip install vxsdk` &nbsp;·&nbsp; `pip install vxcloud` | [![PyPI](https://img.shields.io/pypi/v/vxsdk?label=version&color=3776AB)](https://pypi.org/project/vxsdk/) · [vxcloud](https://pypi.org/project/vxcloud/) |
 | **Go** | `go get github.com/prodxcloud/vxcloud` | [pkg.go.dev](https://pkg.go.dev/github.com/prodxcloud/vxcloud) |
+| **C++** (≥ 17) | `cmake` + libcurl — see [`cpp/`](./cpp) | source (preview) |
+| **Java** (JDK ≥ 11) | Maven `io.vxcloud:vxsdk` — see [`java/`](./java) | source (preview) |
 
 > `vxcloud` (PyPI) is a brand alias that re-exports `vxsdk` — `import vxcloud` ≡ `import vxsdk`.
 > Source: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud) · Docs: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
@@ -112,6 +114,41 @@ func main() {
     })
     fmt.Println(res["status"])
 }
+```
+
+**C++** (≥ 17, libcurl) — see [`cpp/`](./cpp)
+```cpp
+#include "vxsdk/vxsdk.hpp"
+#include <iostream>
+
+int main() {
+    vx::ClientOptions o;
+    o.api_key   = std::getenv("VX_API_KEY");    // xc_live_…
+    o.username  = "alice";
+    o.tenant_id = std::getenv("VX_TENANT_ID");  // needed for agentcontrol.*
+    vx::Client c(std::move(o));
+
+    std::cout << c.ensure_node_url() << "\n";
+    std::cout << c.health() << "\n";                       // no auth
+    std::cout << c.agentcontrol_llm_providers() << "\n";   // authenticated
+}
+// build: cmake -S cpp -B build && cmake --build build   (or the g++ line in cpp/README.md)
+```
+
+**Java** (JDK ≥ 11, zero runtime deps) — see [`java/`](./java)
+```java
+import io.vxcloud.sdk.VxClient;
+
+VxClient c = VxClient.builder()
+        .apiKey(System.getenv("VX_API_KEY"))       // xc_live_…
+        .username("alice")
+        .tenantId(System.getenv("VX_TENANT_ID"))   // needed for agentcontrol.*
+        .build();
+
+System.out.println(c.ensureNodeUrl());
+System.out.println(c.health());                    // no auth
+System.out.println(c.agentcontrolLlmProviders());  // authenticated
+// build: mvn -f java package   (or the javac line in java/README.md)
 ```
 
 ---

@@ -26,6 +26,7 @@ import (
 	"github.com/prodxcloud/vxcloud/observability"
 	"github.com/prodxcloud/vxcloud/robotic"
 	"github.com/prodxcloud/vxcloud/services"
+	"github.com/prodxcloud/vxcloud/salesshift"
 	"github.com/prodxcloud/vxcloud/sessions"
 	"github.com/prodxcloud/vxcloud/transport"
 	"github.com/prodxcloud/vxcloud/vxchrono"
@@ -36,7 +37,7 @@ import (
 )
 
 // Version is the SDK version string. Bumped manually on tag.
-const Version = "0.1.0-preview"
+const Version = "2026.8.13"
 
 const (
 	defaultInfinityURL = "https://api.vxcloud.io"
@@ -215,6 +216,12 @@ func (c *Client) TenantID() string { return c.cfg.tenantID }
 // Sessions returns the deployment-sessions resource module.
 func (c *Client) Sessions() *sessions.Client {
 	return &sessions.Client{T: c.t, NodeURL: c.NodeURL()}
+}
+
+// SalesShift returns the SalesShift email-service module — tracked sends
+// with suppression gating and the tenant-node email worker.
+func (c *Client) SalesShift() *salesshift.Client {
+	return &salesshift.Client{T: c.t, InfinityURL: c.InfinityURL(), NodeURL: c.NodeURL()}
 }
 
 // CICD returns the CI/CD resource module.

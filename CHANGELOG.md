@@ -5,6 +5,140 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.13]
+
+Released across every language at once: Go, Python (sync + async), TypeScript,
+and — new in this release — C++ and Java. `Version` in `client.go` moves off
+`0.1.0-preview` onto the same CalVer number the other SDKs already carried, so
+`vxsdk-go/<version>` in the User-Agent finally matches the tag.
+
+### Added — C++ SDK (`cpp/`)
+
+A header + single translation unit (`include/vxsdk/vxsdk.hpp`, `src/vxsdk.cpp`)
+built on libcurl, C++17, no other dependency. `VxClient` covers auth, agents,
+chat and AgentControl; errors surface as `VxException` rather than return codes.
+Build with CMake (`project(vxsdk_cpp VERSION 2026.8.13)`) or drop the two files
+into an existing tree. `examples/example.cpp` and `examples/ac_test.cpp` compile
+against a live workspace.
+
+### Added — Java SDK (`java/`)
+
+`io.vxcloud.sdk` — `VxClient` (builder-configured), `VxException`, and a
+zero-dependency `Json` codec, so the artifact pulls in nothing but the JDK
+(11+, `java.net.http`). Maven coordinates in `java/pom.xml` at `2026.8.13`.
+Chosen over Jackson/Gson deliberately: an SDK that forces a JSON library on a
+caller who already has one is a dependency conflict waiting to happen.
+
+### Added — Leads / prospect pool (Python, TypeScript)
+
+The cross-tenant pool of people and companies, and the saved-lead lifecycle on
+top of it. Search (`search_leads` / `search_all_leads` with auto-pagination),
+facets, pool detail lookups, reveal with quota accounting
+(`reveal_quota` / `preview_reveal_cost` / `reveal_lead`), save, update, convert
+(single, bulk, and straight from the pool), company enrichment, saved searches,
+and GDPR erasure requests.
+
+- A revealed email costs quota, so `preview_reveal_cost` exists to price a
+  batch **before** spending it. `VxLeadQuotaExhaustedError` /
+  `VxLeadErasedError` are distinct exception types because the caller's
+  response differs: back off and retry later vs. never ask again.
+- `describe_convert` renders every bucket a convert splits into
+  (converted / skipped / failed) — a partial success reported as success is
+  how duplicate contacts get created.
+- TypeScript mirrors this in `src/leads.ts` with `LEADS_MAX_BATCH`,
+  `LEADS_MAX_PAGE_SIZE`, `LEADS_MAX_LIST_LIMIT` and `LEADS_TOTAL_CAP` exported,
+  so callers can chunk correctly instead of discovering the server's ceilings
+  through 4xx responses.
+
+### Added — Sandboxes (Python)
+
+`Sandboxes` — `create` / `list` / `get` / `delete` / `extend` / `wait_ready`
+for the ephemeral podman-container dev environments. `extend` exists because
+sandboxes carry a TTL and expire out from under a long job; `wait_ready` polls
+so callers do not hand-roll a sleep loop against a container that is still
+pulling its image.
+
+### Added — SalesShift parity in Python (sync + async)
+
+Everything the Go and TypeScript SDKs gained below now has a Python equivalent
+on the `SalesShift` resource: billing (plans / subscription / invoices /
+checkout), social (channels / posts / distribute / webmaster inspect),
+opportunities (list / get / post / apply / save / dismiss / push-to-lead),
+tasks (list / create / update / complete / delete) and campaigns (list /
+create / get / send / `wait_for_campaign`). `vxsdk_async` carries the async
+flavor of the same surface.
+
+### Added — TypeScript module exports
+
+`Transport` and its types are now exported from `index.ts`. Previously the
+resource classes could be imported but never named in a typed signature — every
+constructor takes a `Transport` — and there was no escape hatch for an endpoint
+the SDK does not wrap yet. It is also the seam for stubbing in tests
+(`new Leads(fakeTransport)`).
+
+`SalesShiftContacts` / `SalesShiftWorkflows` / `SalesShiftSequences` ship in
+`src/salesshift-crm.ts`. Note the rename on the way out: `Workflow` is exported
+as `SalesShiftWorkflow`, because `Workflow` is already taken by the VxCloud
+workflow engine, which is a different product entirely.
+
+### Added — SalesShift platform surface: billing, social, signals, tasks, campaigns (2026-08-12)
+
+The SalesShift API grew five surfaces that neither the SDK nor `vxcli` could
+reach. Both now cover all of them, in Go and TypeScript, with matching `vxcli`
+commands. Previously the SDK exposed exactly four SalesShift methods
+(`SendEmail`, `ListEmails`, `GetStats`, `GetWorkerHealth`) — everything below
+was unreachable except by hand-rolling HTTP.
+
+**Go — `salesshift/billing.go`** (what the workspace pays US, not what its own
+customers pay it):
+- `ListPlans`, `GetSubscription`, `ListInvoices`, `ListBillingEvents`
+- `StartCheckout`, `ConfirmCheckout`, `BillingPortal`
+- `ChangeSubscription`, `CancelSubscription`, `ResumeSubscription`
+- `PlanQuotas` uses `*int` — **nil means unlimited**. A plain `int` would render
+  as 0, which reads as "no allowance", the opposite of what the API means.
+
+**Go — `salesshift/social.go`**:
+- `ListChannels`, `ListPosts`, `CreatePost`, `DeletePost`, `DistributePost`,
+  `GetSocialStats`
+- `DistributeJob` carries `WallMs` / `SequentialMs` / `Speedup` — the fan-out
+  runs one goroutine per network in the `vxsocial` service, and the speedup is
+  a measurement rather than a claim.
+- Every `SocialDelivery` carries `Simulated`. Callers **must** surface it: this
+  deployment holds no social API credentials, and reporting a simulated post as
+  published is the one unforgivable lie this SDK could tell.
+- Webmaster: `InspectURL`, `CheckRobots`, `CheckSitemap`, `GenerateWebmasterFiles`.
+
+**Go — `salesshift/opportunities.go`** (the cross-tenant signal pool):
+- `ListOpportunities` (source / signal_type / min_score / saved_only filters),
+  `GetOpportunity`, `SaveOpportunity`, `DismissOpportunity`, `PushToLead`,
+  `ConvertOpportunity`
+- Save and dismiss are per-organization: the rows are shared by every tenant,
+  so those PATCHes change side-table state, never the signal itself.
+
+**Go — `salesshift/tasks.go`**:
+- `ListTasks` / `CreateTask` / `UpdateTask` / `DeleteTask` — now including
+  `Goal`, `Progress` and `Assignee*`, which the API gained and the SDK never had.
+- `ListCampaigns`, `GetCampaign` (recipients + hourly timeline), `SendCampaign`
+- `GetRevealQuota` — `Unlimited` is a first-class field; `Allowance` is -1 when
+  uncapped and `Remaining` stays a large finite number so callers can keep
+  doing integer comparisons.
+
+**TypeScript — `src/salesshift-platform.ts`**: `SalesShiftBilling`,
+`SalesShiftSocial`, `SalesShiftOpportunities`, `SalesShiftTasks`,
+`SalesShiftCampaigns`, exported from `index.ts`. Same snake_case ↔ camelCase
+mapping at the boundary as every other module.
+
+**vxcli — `cmd/salesshift_platform.go`**: `billing`, `social`, `webmaster`,
+`opportunities`, `tasks` and `campaigns` command trees under `vxcli salesshift`.
+All honour `--output json|yaml`. Destructive or spending commands
+(`billing cancel`, `campaigns send`) confirm first and take `--yes`.
+
+Verified live against `api.vxcloud.io` — billing plans/subscription/invoices/
+events, social channels/stats/post+distribute (3.4x measured across 6 channels),
+opportunities list with real scraped signals, tasks list/add, campaign report,
+and webmaster inspect/robots.
+
+
 ### Added — Workspace surface backfill + 3 new credential entities (2026-05-29)
 
 Cross-SDK additions covering every language (Go / Python sync + async / TypeScript)

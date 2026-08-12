@@ -5,6 +5,57 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.13]
+
+### Added — Leads (`src/leads.ts`)
+
+The prospect pool: search with filters and facets, pool person/company detail,
+reveal with quota accounting, save, update, convert (single / bulk / straight
+from the pool), company enrichment, saved searches, and GDPR erasure requests.
+
+Kept separate from `SalesShift` on purpose — a lead is not mailable until it is
+converted into a Contact, and collapsing the two would invite sending to
+unconverted rows.
+
+- Server-enforced limits are exported (`LEADS_MAX_BATCH`, `LEADS_MAX_PAGE_SIZE`,
+  `LEADS_MAX_LIST_LIMIT`, `LEADS_TOTAL_CAP`) so callers chunk correctly instead
+  of discovering the ceilings through 4xx responses.
+- `VxLeadQuotaExceededError` and `VxLeadErasedError` are separate classes: the
+  first means back off and retry later, the second means never ask again.
+- `estimateRevealCost` prices a batch before quota is spent; `describeConvert`
+  renders every bucket a convert splits into, because a partial success reported
+  as success is how duplicate contacts get created.
+
+### Added — SalesShift platform (`src/salesshift-platform.ts`)
+
+`SalesShiftBilling`, `SalesShiftSocial`, `SalesShiftOpportunities`,
+`SalesShiftTasks`, `SalesShiftCampaigns`.
+
+- `PlanQuotas` fields are nullable — **null means unlimited**. A plain number
+  would render as 0, which reads as "no allowance", the opposite of the truth.
+- Every `SocialDelivery` carries `simulated`. Surface it: a deployment without
+  social API credentials still returns a delivery record, and reporting a
+  simulated post as published is the one unforgivable lie this SDK could tell.
+
+### Added — SalesShift CRM (`src/salesshift-crm.ts`)
+
+`SalesShiftContacts`, `SalesShiftWorkflows`, `SalesShiftSequences`. The
+workflow type is exported as `SalesShiftWorkflow`: `Workflow` is already taken
+by the VxCloud workflow engine (`./workflow.js`), a different product entirely.
+
+### Added — `Transport` is now exported
+
+Every resource constructor takes a `Transport`, so without it exported the
+classes could be imported but never named in a typed signature. It is also the
+escape hatch for an endpoint the SDK does not wrap yet, and the seam for
+stubbing in tests (`new Leads(fakeTransport)`).
+
+### Changed
+
+- `VERSION` → `2026.8.13`, matching the Go, Python, C++ and Java SDKs.
+- `agentcontrol` and `cicd` pick up the endpoints added server-side since
+  `2026.6.15`.
+
 ## [2026.6.10]
 
 - Adopt CalVer (`YYYY.M.D`) — the package version now tracks the vxnode fleet

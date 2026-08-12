@@ -5,6 +5,14 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.8.13
+
+- Re-pinned to `vxsdk==2026.8.13` (base + `[async]` extra), which brings the
+  leads / prospect pool, `Sandboxes`, and the full SalesShift platform surface
+  (billing, social, opportunities, tasks, campaigns) through the alias.
+- No shim-side API changes: `import vxcloud` still re-exports every public name
+  from `vxsdk`, and `import vxcloud_async` forwards to `vxsdk_async`.
+
 ## 2026.6.10
 
 - Adopt CalVer (`YYYY.M.D`) — version now matches the vxnode fleet release

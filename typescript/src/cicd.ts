@@ -21,16 +21,20 @@ export class Pipelines {
   constructor(private t: Transport) {}
 
   async list(): Promise<Pipeline[]> {
-    const res = await this.t.get<{ pipelines?: Pipeline[] } | Pipeline[]>('/api/v2/cicd/pipelines');
-    if (Array.isArray(res.body)) return res.body.map(wrapPipeline);
-    return ((res.body as { pipelines?: Pipeline[] })?.pipelines ?? []).map(wrapPipeline);
+    const res = await this.t.get<unknown>('/api/v2/cicd/pipelines');
+    return unwrapArray(res.body).map(wrapPipeline);
   }
 
   async show(id: string): Promise<Pipeline> {
-    const res = await this.t.get<Record<string, unknown>>(
+    const res = await this.t.get<unknown>(
       `/api/v2/cicd/pipelines/${encodeURIComponent(id)}`,
     );
-    return wrapPipeline(res.body);
+    return wrapPipeline(unwrapObject(res.body));
+  }
+
+  /** Alias for {@link show}; mirrors the Python/Go `get`. */
+  async get(id: string): Promise<Pipeline> {
+    return this.show(id);
   }
 
   async trigger(id: string, branch = 'main'): Promise<Record<string, unknown>> {
@@ -61,6 +65,29 @@ export class GitProviders {
     if (Array.isArray(res.body)) return res.body;
     return (res.body as { providers?: unknown[] })?.providers ?? [];
   }
+}
+
+/** Unwrap a list body. The node returns the platform envelope
+ *  `{status,message,data:[…]}`; older/alt shapes use a bare array or a
+ *  `pipelines` key. */
+function unwrapArray(body: unknown): unknown[] {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    if (Array.isArray(o.data)) return o.data;
+    if (Array.isArray(o.pipelines)) return o.pipelines;
+  }
+  return [];
+}
+
+/** Unwrap a single-object body from the `{status,message,data:{…}}`
+ *  envelope, falling back to the body itself when not enveloped. */
+function unwrapObject(body: unknown): unknown {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const o = body as Record<string, unknown>;
+    if (o.data && typeof o.data === 'object') return o.data;
+  }
+  return body;
 }
 
 function wrapPipeline(input: unknown): Pipeline {
