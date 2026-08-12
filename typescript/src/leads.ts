@@ -301,8 +301,16 @@ export interface LeadFacets {
 /** Reveals spent this period. `remaining` is authoritative — do not derive it. */
 export interface RevealQuota {
   used: number;
+  /** -1 when the org is uncapped. Read {@link unlimited} rather than testing
+   *  this for -1 — a caller that renders `allowance` verbatim shows "-1". */
   allowance: number;
+  /** Large finite number when uncapped (never Infinity), so integer
+   *  comparisons and arithmetic keep working. */
   remaining: number;
+  /** True when this org has no cap. The server sends it; without it a caller
+   *  sees `allowance: -1` and has no way to tell "uncapped" from "broken", so
+   *  uncapped orgs get told their allowance is spent. */
+  unlimited: boolean;
   /** "3 / 200". */
   display: string;
 }
@@ -1235,14 +1243,20 @@ export function estimateRevealCost(
     willSpend += 1;
   }
   const remaining = quota ? Math.max(0, quota.remaining) : null;
-  const affordable = remaining === null ? willSpend : Math.min(willSpend, remaining);
+  // An uncapped org can always afford the batch. Its `remaining` is a large
+  // finite sentinel, so the arithmetic below would "work" but render nonsense
+  // like "1000000000 remaining now" — hence the explicit branch.
+  const uncapped = Boolean(quota?.unlimited);
+  const affordable = remaining === null || uncapped ? willSpend : Math.min(willSpend, remaining);
   const shortfall = willSpend - affordable;
 
   const parts = [`${list.length} selected`];
   if (alreadyRevealed) parts.push(`${alreadyRevealed} already revealed (free)`);
   if (noAddress) parts.push(`${noAddress} with no address`);
   parts.push(willSpend === 1 ? '1 reveal will be spent' : `${willSpend} reveals will be spent`);
-  if (remaining !== null) {
+  if (uncapped) {
+    parts.push('unlimited allowance');
+  } else if (remaining !== null) {
     parts.push(shortfall > 0
       ? `only ${affordable} of ${willSpend} affordable — ${shortfall} would come back as skippedNoQuota (${quota?.display ?? ''})`
       : `${remaining} remaining now, ${remaining - willSpend} after this`);
@@ -1661,13 +1675,17 @@ function toPoolSnapshot(p: Record<string, unknown>): LeadPoolSnapshot {
 function toQuota(q: Record<string, unknown>): RevealQuota {
   const used = num(q.used);
   const allowance = num(q.allowance);
+  // Trust the server's flag; fall back to the -1 sentinel only when it is
+  // absent, so an older control plane still reports uncapped orgs correctly.
+  const unlimited = q.unlimited === undefined ? allowance < 0 : Boolean(q.unlimited);
   return {
     used,
     allowance,
     // `remaining` is authoritative when the server sends it — deriving it is
     // how clients end up disagreeing with the meter they are displaying.
     remaining: q.remaining === undefined ? Math.max(0, allowance - used) : num(q.remaining),
-    display: str(q.display) || `${used} / ${allowance}`,
+    unlimited,
+    display: str(q.display) || (unlimited ? `${used} revealed` : `${used} / ${allowance}`),
   };
 }
 

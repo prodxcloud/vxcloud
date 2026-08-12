@@ -52,7 +52,14 @@ export interface WorkerHealth {
 }
 
 export class SalesShift {
-  constructor(private t: Transport) {}
+  /**
+   * @param t          transport
+   * @param ensureNode resolves the tenant node URL on demand. Optional so a
+   *   caller can still construct `new SalesShift(transport)` directly (tests,
+   *   or driving one resource without the full client); when it is absent the
+   *   node-scoped call below falls back to whatever base the transport has.
+   */
+  constructor(private t: Transport, private ensureNode?: () => Promise<string>) {}
 
   /** Send one tracked email. Suppressed/unsubscribed recipients are rejected. */
   async sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
@@ -101,6 +108,11 @@ export class SalesShift {
 
   /** Health of the tenant-node Go email worker. */
   async getWorkerHealth(): Promise<WorkerHealth> {
+    // The worker runs on the tenant node, not the control plane. Without this
+    // the request goes to infinityURL (the transport's default base) and 404s,
+    // which reads as "worker is down" when it is actually healthy. Python's
+    // client.ensure_node_url() does the same thing.
+    if (this.ensureNode) await this.ensureNode();
     const res = await this.t.get<Record<string, unknown>>('/api/v2/salesshift/email/health');
     const r = res.body ?? {};
     return {

@@ -339,11 +339,25 @@ type LeadFacetsResult struct {
 // Remaining is sent by the server rather than derived, because a client that
 // computes it will eventually compute it wrong at exactly the moment the
 // number is being read.
+// RevealQuotaStatus is the reveal meter as returned by RevealQuota.
+//
+// NOTE: GetRevealQuota (tasks.go) returns RevealQuota for the SAME endpoint,
+// /api/v1/salesshift/leads/quota. The two are kept because both are public API
+// and removing either would break callers; they now carry the same fields.
 type RevealQuotaStatus struct {
-	Used      int    `json:"used"`
-	Allowance int    `json:"allowance"`
+	Used int `json:"used"`
+	// -1 when the org is uncapped. Branch on Unlimited rather than testing this
+	// for -1 — a caller that renders Allowance verbatim shows "-1".
+	Allowance int `json:"allowance"`
+	// True when the org has no cap. Without it a caller sees Allowance == -1
+	// and cannot tell "uncapped" from "broken", so uncapped orgs get told their
+	// allowance is spent. The server has always sent this; the field was simply
+	// missing here, so encoding/json discarded it.
+	Unlimited bool `json:"unlimited"`
+	// Large finite number when uncapped (never negative), so integer
+	// comparisons and arithmetic keep working.
 	Remaining int    `json:"remaining"`
-	Display   string `json:"display"` // "3 / 200"
+	Display   string `json:"display"` // "3 / 200", or "9 revealed" when uncapped
 }
 
 // RevealResult is one un-masked person plus the meter after the spend.

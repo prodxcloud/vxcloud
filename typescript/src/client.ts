@@ -133,6 +133,10 @@ export class VxCloud {
   readonly username: string;
 
   private t: Transport;
+  /** Cached tenant-node URL once resolved (or set explicitly). */
+  private nodeUrlResolved = '';
+  /** In-flight resolution, so concurrent callers share one lookup. */
+  private nodeUrlPending?: Promise<string>;
 
   constructor(opts: VxCloudOptions) {
     if (!opts.apiKey && !opts.accessToken) {
@@ -154,12 +158,15 @@ export class VxCloud {
 
     this.tenantId = opts.tenantId ?? '';
     this.username = opts.username ?? '';
+    // An explicit nodeURL is the caller's decision and must win over discovery
+    // — treat it as already resolved so ensureNodeUrl() never overrides it.
+    if (opts.nodeURL) this.nodeUrlResolved = opts.nodeURL.replace(/\/+$/, '');
 
     this.auth = new AuthFacade(this.t);
     this.agents = new Agents(this.t);
     this.agentcontrol = new AgentControl(this.t, () => this.tenantId);
     this.billing = new Billing(this.t);
-    this.salesshift = new SalesShift(this.t);
+    this.salesshift = new SalesShift(this.t, () => this.ensureNodeUrl());
     this.contacts = new SalesShiftContacts(this.t);
     this.workflows = new SalesShiftWorkflows(this.t);
     this.sequences = new SalesShiftSequences(this.t);
@@ -219,6 +226,48 @@ export class VxCloud {
   /** Switch the active tenant node by URL. */
   setNodeURL(url: string): void {
     this.t.setNodeURL(url);
+    this.nodeUrlResolved = url;
+  }
+
+  /**
+   * Resolve the tenant node base URL the way the dashboard does, and point the
+   * transport at it.
+   *
+   * Node-scoped endpoints (`/api/v2/*` — provisioning, sessions, services, the
+   * SalesShift email worker) live on the caller's per-tenant node, not on the
+   * Infinity control plane. A client constructed without an explicit `nodeURL`
+   * defaults to the control-plane URL, so those calls 404 — which reads as
+   * "the service is down" rather than "you are asking the wrong host".
+   *
+   * Idempotent and cached; safe to await on every node-scoped call. Mirrors
+   * `Client.ensure_node_url()` in the Python SDK, including the field
+   * precedence: custom domain, then load balancer, then public IP.
+   */
+  async ensureNodeUrl(): Promise<string> {
+    if (this.nodeUrlResolved) return this.nodeUrlResolved;
+    if (!this.nodeUrlPending) {
+      // Single-flight: concurrent node-scoped calls must not each fire their
+      // own /auth/nodes/ request.
+      this.nodeUrlPending = (async () => {
+        const nodes = await this.nodes.list();
+        const node = nodes.find((n) => n.isDefault) ?? nodes[0];
+        if (!node) {
+          throw new Error('VxCloud.ensureNodeUrl: no node records returned for this account');
+        }
+        const raw = node.raw ?? {};
+        const addr = String(
+          raw.custom_domain_name || raw.load_balancer || raw.public_ip || node.url || '',
+        ).trim();
+        if (!addr) {
+          throw new Error('VxCloud.ensureNodeUrl: default node record has no resolvable address');
+        }
+        const url = (addr.startsWith('http') ? addr : `https://${addr}`).replace(/\/+$/, '');
+        this.t.setNodeURL(url);
+        this.nodeUrlResolved = url;
+        return url;
+      })().finally(() => { this.nodeUrlPending = undefined; });
+    }
+    return this.nodeUrlPending;
   }
 }
 

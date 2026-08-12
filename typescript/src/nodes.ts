@@ -131,11 +131,20 @@ export class Nodes {
 
 function wrap(n: NodeInfo | Record<string, unknown>): NodeInfo {
   const b = n as Record<string, unknown>;
+  // The control plane sends `is_default_node`. Reading only `is_default` /
+  // `default` made isDefault false on EVERY record, so `current()` silently
+  // returned whatever happened to be first rather than the user's default —
+  // and callers routed node traffic at the wrong host. The other two keys stay
+  // as fallbacks in case an older/other endpoint shape sends them.
+  const isDefault = Boolean(b.is_default_node ?? b.is_default ?? b.default);
+  // There is no `name` on the node record; the human-readable identifier is
+  // `hostname` (custom_domain_name when the node has one).
+  const name = String(b.name ?? b.hostname ?? b.custom_domain_name ?? '');
   return {
     id: (b.id as string | number) ?? '',
-    name: (b.name as string) ?? '',
+    name,
     url: b.url as string | undefined,
-    isDefault: Boolean(b.is_default ?? b.default),
+    isDefault,
     raw: b,
   };
 }
