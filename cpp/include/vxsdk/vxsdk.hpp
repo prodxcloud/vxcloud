@@ -2,8 +2,8 @@
 //
 // Header for a small, libcurl-backed client that speaks the same wire
 // contract as the Go / Python / TypeScript SDKs:
-//   - auth exchange   POST {infinity}/api/v1/auth/developer/keys/login
-//   - node discovery  GET  {infinity}/api/v1/auth/nodes/
+//   - auth exchange   POST {vxcloud}/api/v1/auth/developer/keys/login
+//   - node discovery  GET  {vxcloud}/api/v1/auth/nodes/
 //   - node ops        {node}/api/v2/...   (cicd, sessions, agentcontrol, health)
 //
 // Auth model (mirrors python/vxsdk.py Client._auth_headers):
@@ -32,7 +32,7 @@
 
 namespace vx {
 
-constexpr const char* kDefaultInfinityUrl = "https://api.vxcloud.io";
+constexpr const char* kDefaultVxCloudUrl = "https://api.vxcloud.io";
 constexpr long        kDefaultTimeout     = 30;   // seconds
 constexpr long        kLongTimeout        = 600;  // installs / deploys
 
@@ -142,7 +142,7 @@ struct ClientOptions {
     std::string username;
     std::string access_token;  // pre-obtained Bearer JWT (alternative to api_key)
     std::string refresh_token;
-    std::string infinity_url = kDefaultInfinityUrl;
+    std::string vxcloud_url = kDefaultVxCloudUrl;
     std::string node_url;      // e.g. https://node1.vxcloud.io (auto-resolved if empty)
     std::string tenant_id;     // required for agentcontrol.* (X-Tenant-ID)
     std::string user_agent;    // defaults to vxsdk-cpp/<version>
@@ -228,9 +228,9 @@ public:
     // providers (tenant-node email worker preferred) with suppression gating,
     // daily caps and open/click tracking. Merge tags like {{first_name}} are
     // resolved against the contact record.
-    //   POST {infinity}/api/v1/salesshift/email/send
-    //   GET  {infinity}/api/v1/salesshift/emails[?status=]
-    //   GET  {infinity}/api/v1/salesshift/stats
+    //   POST {vxcloud}/api/v1/salesshift/email/send
+    //   GET  {vxcloud}/api/v1/salesshift/emails[?status=]
+    //   GET  {vxcloud}/api/v1/salesshift/stats
     //   GET  {node}/api/v2/salesshift/email/health
     std::string salesshift_send_email(const std::string& to_email,
                                       const std::string& subject,
@@ -243,7 +243,7 @@ public:
     //
     // A global, tenant-blind database of people and companies, plus this
     // tenant's saved copies of rows out of it. Every endpoint lives on the
-    // INFINITY control plane (`{infinity}/api/v1/salesshift/leads…`), not on
+    // VXCLOUD control plane (`{vxcloud}/api/v1/salesshift/leads…`), not on
     // the tenant node — the implementations build absolute URLs for that
     // reason, exactly like the salesshift email methods above.
     //
@@ -287,70 +287,70 @@ public:
     // `data.total`. `data.sort` is the sort that was APPLIED and `data
     // .search_backend` names the engine that answered ("go-node", or
     // "fastapi-orm" while the node is down).
-    //   POST {infinity}/api/v1/salesshift/leads/search
+    //   POST {vxcloud}/api/v1/salesshift/leads/search
     std::string leadsSearch(const LeadSearchRequest& request);
 
     // Counts per seniority / department / country / email_status for a filter
     // set. Pool-wide: no tenant overlay, because the number of Directors in
     // the pool is the same for everyone.
-    //   POST {infinity}/api/v1/salesshift/leads/facets
+    //   POST {vxcloud}/api/v1/salesshift/leads/facets
     std::string leadsFacets(const LeadFilters& filters = LeadFilters{});
 
     // Reveals used / allowance / remaining this period, plus a "3 / 200"
     // display string. Read it before any bulk reveal so the cost is visible
     // first (rule 3).
-    //   GET {infinity}/api/v1/salesshift/leads/quota
+    //   GET {vxcloud}/api/v1/salesshift/leads/quota
     std::string leadsQuota();
 
     // Un-mask one person: real email, phone, linkedin_url, and the quota AFTER
     // the spend. SPENDS ONE REVEAL — free if this org already revealed the
     // row. Throws VxError 402 when the allowance is gone (nothing was charged
     // for the attempt) and 410 if the person has been erased.
-    //   POST {infinity}/api/v1/salesshift/leads/reveal
+    //   POST {vxcloud}/api/v1/salesshift/leads/reveal
     std::string leadsReveal(const std::string& pool_person_id);
 
     // Copy pool rows into the tenant's saved leads. A SNAPSHOT taken now: the
     // pool is re-crawled continuously and a qualified list must not move
     // underneath whoever qualified it. Saving reveals NOTHING and does not
     // make a row mailable. Max 200 ids.
-    //   POST {infinity}/api/v1/salesshift/leads/save
+    //   POST {vxcloud}/api/v1/salesshift/leads/save
     std::string leadsSave(const std::vector<std::string>& pool_person_ids);
 
     // Full detail for one pool person, and for one company plus the people
     // behind it split into `new_prospects` / `existing_contacts`. Masking
     // applies here exactly as in search — a detail view is not a back door
     // around the meter.
-    //   GET {infinity}/api/v1/salesshift/leads/pool/{pool_id}
-    //   GET {infinity}/api/v1/salesshift/leads/company/{company_id}
+    //   GET {vxcloud}/api/v1/salesshift/leads/pool/{pool_id}
+    //   GET {vxcloud}/api/v1/salesshift/leads/company/{company_id}
     std::string leadsPoolPerson(const std::string& pool_id);
     std::string leadsCompany(const std::string& company_id);
 
     // The tenant's saved leads. `status` filters (new|contacted|converted|…),
     // `limit` <= 500 (0 = server default of 100).
-    //   GET {infinity}/api/v1/salesshift/leads
+    //   GET {vxcloud}/api/v1/salesshift/leads
     std::string leadsList(const std::string& status = "", int limit = 0);
 
     // One saved lead, the live pool row behind it, and `drift` — non-empty
     // when the pool has moved on since the snapshot was taken.
-    //   GET {infinity}/api/v1/salesshift/leads/{lead_id}
+    //   GET {vxcloud}/api/v1/salesshift/leads/{lead_id}
     std::string leadsGet(const std::string& lead_id);
 
     // Update status / score / notes / tags / owner on a saved lead. Only the
     // engaged fields of `patch` are sent.
-    //   PATCH {infinity}/api/v1/salesshift/leads/{lead_id}
+    //   PATCH {vxcloud}/api/v1/salesshift/leads/{lead_id}
     std::string leadsUpdate(const std::string& lead_id, const LeadUpdate& patch);
 
     // Saved lead → Contact: the one-way gate that makes a record mailable
     // (rule 1). The lead row is kept as an audit trail, never moved. Throws
     // VxError 400 if the lead has no revealed address, or if it has been
     // erased. Answers `already_converted` rather than duplicating a contact.
-    //   POST {infinity}/api/v1/salesshift/leads/{lead_id}/convert
+    //   POST {vxcloud}/api/v1/salesshift/leads/{lead_id}/convert
     std::string leadsConvert(const std::string& lead_id,
                              const std::string& lifecycle_stage = "");
 
     // Many saved leads → Contacts. Reports converted / skipped_no_email /
     // already_converted — render all three, not just the first.
-    //   POST {infinity}/api/v1/salesshift/leads/bulk-convert
+    //   POST {vxcloud}/api/v1/salesshift/leads/bulk-convert
     std::string leadsBulkConvert(const std::vector<std::string>& lead_ids);
 
     // Pool → Contact in one step: save, reveal if needed, convert. SPENDS
@@ -366,7 +366,7 @@ public:
     // allowance runs out mid-batch the server converts what it can, and a
     // partial spend reported as a success is exactly the failure this split
     // exists to prevent.
-    //   POST {infinity}/api/v1/salesshift/leads/convert-from-pool
+    //   POST {vxcloud}/api/v1/salesshift/leads/convert-from-pool
     std::string leadsConvertFromPool(const std::vector<std::string>& pool_person_ids,
                                      bool reveal_if_needed = true,
                                      const std::string& lifecycle_stage = "");
@@ -376,7 +376,7 @@ public:
     // not just the caller's — and the address is retained only as a hash so
     // future crawls keep honouring the block. There is no undo. A UI wrapping
     // this must say all of that and demand explicit confirmation.
-    //   POST {infinity}/api/v1/salesshift/leads/erasure
+    //   POST {vxcloud}/api/v1/salesshift/leads/erasure
     std::string leadsErasure(const std::string& email,
                              const std::string& reason = "gdpr_erasure",
                              const std::string& note = "");
@@ -395,13 +395,13 @@ public:
     //
     // Slow by nature (up to a dozen page fetches; the server's ceiling is 90s),
     // so callers should raise their own timeout accordingly.
-    //   POST {infinity}/api/v1/salesshift/leads/enrich
+    //   POST {vxcloud}/api/v1/salesshift/leads/enrich
     std::string leadsEnrich(const std::string& domain,
                             const std::string& company_id = "");
 
     // Saved searches: list them, or store one filter set under a name.
-    //   GET  {infinity}/api/v1/salesshift/lead-searches
-    //   POST {infinity}/api/v1/salesshift/lead-searches
+    //   GET  {vxcloud}/api/v1/salesshift/lead-searches
+    //   POST {vxcloud}/api/v1/salesshift/lead-searches
     std::string leadsSavedSearches();
     std::string leadsSaveSearch(const std::string& name, const LeadFilters& filters,
                                 bool is_shared = false);
@@ -420,7 +420,7 @@ private:
     std::map<std::string, std::string> tenant_header() const;  // X-Tenant-ID or throw
 
     std::string api_key_, username_, access_token_, refresh_token_;
-    std::string infinity_url_, node_url_, tenant_id_, user_agent_;
+    std::string vxcloud_url_, node_url_, tenant_id_, user_agent_;
 };
 
 // ── Tiny JSON helpers (extraction only, not a full parser) ────────────────

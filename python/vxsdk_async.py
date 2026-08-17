@@ -45,7 +45,7 @@ from typing import Any, AsyncIterator, Iterable
 import httpx
 
 from vxsdk import (
-    DEFAULT_INFINITY_URL, DEFAULT_LONG_TIMEOUT, DEFAULT_TIMEOUT,
+    DEFAULT_VXCLOUD_URL, DEFAULT_LONG_TIMEOUT, DEFAULT_TIMEOUT,
     STACK_TARGETS, VxAuthError, VxError, VxNetworkError, VxValidationError,
     Whoami, _from_http, _http_reason, _is_retryable, _load_credentials_file,
     _multipart_body, __version__,
@@ -479,7 +479,7 @@ class _AsyncCloud(_AsyncResource):
 class _AsyncNodes(_AsyncResource):
     async def list(self) -> list[dict[str, Any]]:
         body = await self.client._json("GET",
-            self.client.infinity_url + "/api/v1/auth/nodes/",
+            self.client.vxcloud_url + "/api/v1/auth/nodes/",
             op="nodes.list")
         return body.get("data", body) if isinstance(body, dict) else body
 
@@ -1200,9 +1200,9 @@ class _AsyncSalesShift(_AsyncResource):
       Show :meth:`reveal_quota` before a batch and :meth:`describe_convert`
       after one.
 
-    Base URLs: every leads endpoint is on the **Infinity control plane**
+    Base URLs: every leads endpoint is on the **VxCloud control plane**
     (``/api/v1/salesshift/*``), never on the tenant node — so each URL below is
-    built from ``client.infinity_url`` explicitly, exactly as the email methods
+    built from ``client.vxcloud_url`` explicitly, exactly as the email methods
     do. Only :meth:`get_worker_health` talks to the node.
     """
 
@@ -1245,13 +1245,13 @@ class _AsyncSalesShift(_AsyncResource):
         if last_name:
             payload["last_name"] = last_name
         return await self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/email/send",
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/email/send",
             op="salesshift.send_email", json_body=payload,
         )
 
     async def list_emails(self, status: str = "") -> list[dict[str, Any]]:
         """Tracked outbound emails with engagement state (opens/clicks/replies)."""
-        url = self.client.infinity_url + "/api/v1/salesshift/emails"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/emails"
         if status:
             url += f"?status={urllib.parse.quote(status)}"
         body = await self.client._json("GET", url, op="salesshift.list_emails")
@@ -1260,7 +1260,7 @@ class _AsyncSalesShift(_AsyncResource):
     async def get_stats(self) -> dict[str, Any]:
         """Live dashboard stats (contacts, deals, email funnel)."""
         return await self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/stats",
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/stats",
             op="salesshift.get_stats",
         )
 
@@ -1282,8 +1282,8 @@ class _AsyncSalesShift(_AsyncResource):
     # ── leads: transport ──
 
     def _leads_url(self, path: str) -> str:
-        """Absolute Infinity URL. Leads never resolve against ``node_url``."""
-        return self.client.infinity_url + "/api/v1/salesshift" + path
+        """Absolute VxCloud URL. Leads never resolve against ``node_url``."""
+        return self.client.vxcloud_url + "/api/v1/salesshift" + path
 
     async def _leads(self, method: str, path: str, *, op: str,
                      json_body: Any | None = None) -> Any:
@@ -1765,7 +1765,7 @@ class AsyncClient:
 
     def __init__(self, *, api_key: str | None = None, username: str | None = None,
                  access_token: str = "", refresh_token: str = "",
-                 infinity_url: str = DEFAULT_INFINITY_URL,
+                 vxcloud_url: str = DEFAULT_VXCLOUD_URL,
                  node_url: str = "",
                  user_agent: str = f"vxsdk-py-async/{__version__}",
                  http_client: httpx.AsyncClient | None = None):
@@ -1779,7 +1779,7 @@ class AsyncClient:
         self.username = username or ""
         self.access_token = access_token
         self.refresh_token = refresh_token
-        self.infinity_url = infinity_url.rstrip("/")
+        self.vxcloud_url = vxcloud_url.rstrip("/")
         self.node_url = node_url.rstrip("/")
         self.user_agent = user_agent
 
@@ -1811,7 +1811,7 @@ class AsyncClient:
             username=f.get("username"),
             access_token=f.get("access_token", ""),
             refresh_token=f.get("refresh_token", ""),
-            infinity_url=f.get("base_url") or DEFAULT_INFINITY_URL,
+            vxcloud_url=f.get("base_url") or DEFAULT_VXCLOUD_URL,
             node_url=f.get("node_url", ""),
         )
 
@@ -1867,7 +1867,7 @@ class AsyncClient:
             raise VxAuthError("vxsdk_async._refresh",
                               "no api key configured — cannot refresh JWT")
         async with self._lock:
-            url = self.infinity_url + "/api/v1/auth/developer/keys/login"
+            url = self.vxcloud_url + "/api/v1/auth/developer/keys/login"
             assert self._http is not None, "use AsyncClient inside `async with`"
             try:
                 resp = await self._http.post(url,

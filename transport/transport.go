@@ -44,7 +44,7 @@ type Transport struct {
 	// X-API-Key header is suppressed. The node developer-key middleware
 	// accepts a lone Bearer, but a stale or cross-workspace X-API-Key sent
 	// alongside the JWT makes it strict-compare and 403 ("not valid for
-	// this workspace"). Control-plane (Infinity) requests keep X-API-Key.
+	// this workspace"). Control-plane (VxCloud) requests keep X-API-Key.
 	NodeURL string
 	// RefreshOn401, if non-nil, is invoked exactly once per request when a
 	// 401 response is received. On success the request is replayed with the

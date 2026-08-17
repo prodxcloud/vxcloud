@@ -64,7 +64,7 @@ type Workflow struct {
 
 // ListWorkflows returns every workflow, optionally filtered by status.
 func (c *Client) ListWorkflows(ctx context.Context, status string) ([]Workflow, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows")
 	if status != "" {
 		url += "?" + neturl.Values{"status": {status}}.Encode()
 	}
@@ -84,7 +84,7 @@ func (c *Client) GetWorkflow(ctx context.Context, id string) (*Workflow, error) 
 	if id == "" {
 		return nil, errors.New("salesshift.GetWorkflow: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id)
 	var raw struct {
 		Data Workflow `json:"data"`
 	}
@@ -109,7 +109,7 @@ func (c *Client) CreateWorkflow(ctx context.Context, in NewWorkflow) (*Workflow,
 	if in.Name == "" {
 		return nil, errors.New("salesshift.CreateWorkflow: Name is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows")
 	var raw struct {
 		Data Workflow `json:"data"`
 	}
@@ -133,7 +133,7 @@ func (c *Client) UpdateWorkflow(ctx context.Context, id string, p WorkflowPatch)
 	if id == "" {
 		return nil, errors.New("salesshift.UpdateWorkflow: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id)
 	var raw struct {
 		Data Workflow `json:"data"`
 	}
@@ -148,7 +148,7 @@ func (c *Client) DeleteWorkflow(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("salesshift.DeleteWorkflow: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id)
 	if err := c.T.JSON(ctx, "salesshift.DeleteWorkflow", "DELETE", url, nil, nil); err != nil {
 		return fmt.Errorf("salesshift.DeleteWorkflow: %w", err)
 	}
@@ -159,7 +159,7 @@ func (c *Client) workflowAction(ctx context.Context, op, id, action string) (*Wo
 	if id == "" {
 		return nil, fmt.Errorf("salesshift.%s: id is required", op)
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id+"/"+action)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/"+action)
 	var raw struct {
 		Data Workflow `json:"data"`
 	}
@@ -206,7 +206,7 @@ func (c *Client) ValidateWorkflow(ctx context.Context, id string) (*ValidationRe
 	if id == "" {
 		return nil, errors.New("salesshift.ValidateWorkflow: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id+"/validate")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/validate")
 	var out ValidationResult
 	if err := c.T.JSON(ctx, "salesshift.ValidateWorkflow", "POST", url, map[string]any{}, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.ValidateWorkflow: %w", err)
@@ -250,7 +250,7 @@ func (c *Client) TestRun(ctx context.Context, id, contactID string, dryRun bool)
 	if contactID != "" {
 		body["contact_id"] = contactID
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id+"/test-run")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/test-run")
 	var raw struct {
 		Run   WorkflowRun `json:"run"`
 		Data  WorkflowRun `json:"data"`
@@ -296,7 +296,7 @@ func (c *Client) EnrollContacts(ctx context.Context, id string, contactIDs []str
 	if len(contactIDs) == 0 {
 		return nil, errors.New("salesshift.EnrollContacts: contactIDs is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id+"/enroll")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/enroll")
 	var out EnrollResult
 	body := map[string]any{"contact_ids": contactIDs}
 	if err := c.T.JSON(ctx, "salesshift.EnrollContacts", "POST", url, body, &out); err != nil {
@@ -310,7 +310,7 @@ func (c *Client) WorkflowRuns(ctx context.Context, id string) ([]WorkflowRun, er
 	if id == "" {
 		return nil, errors.New("salesshift.WorkflowRuns: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/workflows/"+id+"/runs")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/runs")
 	var raw struct {
 		Data []WorkflowRun `json:"data"`
 	}

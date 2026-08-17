@@ -30,7 +30,7 @@ func TestPipelinesList_HappyPath(t *testing.T) {
 	c, err := vxsdk.New(ctx,
 		vxsdk.WithAPIKey("xc_dev_test1234567890abcd"),
 		vxsdk.WithUsername("alice"),
-		vxsdk.WithInfinityURL(srv.URL()),
+		vxsdk.WithVxCloudURL(srv.URL()),
 		vxsdk.WithNodeURL(srv.URL()),
 	)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestAutoRefreshOn401(t *testing.T) {
 	c, err := vxsdk.New(ctx,
 		vxsdk.WithAPIKey("xc_dev_test1234567890abcd"),
 		vxsdk.WithUsername("alice"),
-		vxsdk.WithInfinityURL(srv.URL()),
+		vxsdk.WithVxCloudURL(srv.URL()),
 		vxsdk.WithNodeURL(srv.URL()),
 	)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestTypedAuthError(t *testing.T) {
 	c, _ := vxsdk.New(ctx,
 		vxsdk.WithAPIKey("xc_dev_test1234567890abcd"),
 		vxsdk.WithUsername("alice"),
-		vxsdk.WithInfinityURL(srv.URL()),
+		vxsdk.WithVxCloudURL(srv.URL()),
 		vxsdk.WithNodeURL(srv.URL()),
 	)
 	_, err := c.CICD().Pipelines().List(ctx)

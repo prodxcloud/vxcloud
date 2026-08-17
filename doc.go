@@ -1,7 +1,7 @@
 // Package vxsdk is the official Go SDK for the vxcloud platform.
 //
 // It provides a typed, ergonomic client over the FastAPI control plane
-// at api.vxcloud.io (Infinity) and per-tenant nodes (e.g. node1.vxcloud.io).
+// at api.vxcloud.io (VxCloud) and per-tenant nodes (e.g. node1.vxcloud.io).
 //
 // The SDK is preview / research quality. It is additive to existing tooling —
 // vxcli, the API gateway, and the FastAPI backend are not modified by this

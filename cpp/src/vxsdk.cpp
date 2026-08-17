@@ -12,7 +12,7 @@
 
 namespace vx {
 
-static const char* kVersion = "2026.8.14";
+static const char* kVersion = "2026.8.17";
 
 // ── VxError ───────────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ Client::Client(ClientOptions o) {
     username_      = o.username;
     access_token_  = o.access_token;
     refresh_token_ = o.refresh_token;
-    infinity_url_  = rstrip_slash(o.infinity_url.empty() ? kDefaultInfinityUrl : o.infinity_url);
+    vxcloud_url_  = rstrip_slash(o.vxcloud_url.empty() ? kDefaultVxCloudUrl : o.vxcloud_url);
     node_url_      = rstrip_slash(o.node_url);
     tenant_id_     = o.tenant_id;
     user_agent_    = o.user_agent.empty() ? (std::string("vxsdk-cpp/") + kVersion)
@@ -273,7 +273,7 @@ Response Client::do_request(const std::string& method, const std::string& url,
 void Client::refresh() {
     if (api_key_.empty())
         throw VxError("vxsdk.refresh", "no api key configured — cannot refresh JWT", 401);
-    std::string url = infinity_url_ + "/api/v1/auth/developer/keys/login";
+    std::string url = vxcloud_url_ + "/api/v1/auth/developer/keys/login";
     std::string body = "{\"api_key\":\"" + api_key_ + "\",\"username\":\"" + username_ + "\"}";
     std::map<std::string, std::string> h{{"Content-Type", "application/json"},
                                          {"Accept", "application/json"}};
@@ -294,7 +294,7 @@ void Client::authenticate() { refresh(); }
 
 const std::string& Client::ensure_node_url() {
     if (!node_url_.empty()) return node_url_;
-    std::string url = infinity_url_ + "/api/v1/auth/nodes/";
+    std::string url = vxcloud_url_ + "/api/v1/auth/nodes/";
     Response r = do_request("GET", url, "", {}, kDefaultTimeout);
     // Pick the default node (or the first) and read its address field.
     // We look for "is_default_node":true; failing that, the first node's
@@ -483,17 +483,17 @@ std::string Client::salesshift_send_email(const std::string& to_email,
     std::string body = "{\"to_email\":\"" + json_escape(to_email) +
         "\",\"subject\":\"" + json_escape(subject) +
         "\",\"body_html\":\"" + json_escape(body_html) + "\"}";
-    return post(infinity_url_ + "/api/v1/salesshift/email/send", body, {}, kLongTimeout);
+    return post(vxcloud_url_ + "/api/v1/salesshift/email/send", body, {}, kLongTimeout);
 }
 
 std::string Client::salesshift_emails(const std::string& status) {
-    std::string url = infinity_url_ + "/api/v1/salesshift/emails";
+    std::string url = vxcloud_url_ + "/api/v1/salesshift/emails";
     if (!status.empty()) url += "?status=" + status;
     return get(url);
 }
 
 std::string Client::salesshift_stats() {
-    return get(infinity_url_ + "/api/v1/salesshift/stats");
+    return get(vxcloud_url_ + "/api/v1/salesshift/stats");
 }
 
 std::string Client::salesshift_worker_health() {
@@ -502,8 +502,8 @@ std::string Client::salesshift_worker_health() {
 
 // ── SalesShift: the leads pool ────────────────────────────────────────────
 //
-// Every leads endpoint lives on the INFINITY control plane, so every URL below
-// is built absolute from infinity_url_. A relative path would go through
+// Every leads endpoint lives on the VXCLOUD control plane, so every URL below
+// is built absolute from vxcloud_url_. A relative path would go through
 // Client::resolve(), which joins it onto the tenant NODE and would 404 — the
 // same reason the salesshift email methods above spell their URLs out.
 //
@@ -618,16 +618,16 @@ std::string Client::leadsSearch(const LeadSearchRequest& request) {
         b.raw("sort", JsonBuilder().str("field", request.sort_field)
                                    .boolean("desc", request.sort_desc)
                                    .build());
-    return post(infinity_url_ + kSalesShift + "/leads/search", b.build());
+    return post(vxcloud_url_ + kSalesShift + "/leads/search", b.build());
 }
 
 std::string Client::leadsFacets(const LeadFilters& filters) {
     std::string body = JsonBuilder().raw("filters", encode_filters(filters)).build();
-    return post(infinity_url_ + kSalesShift + "/leads/facets", body);
+    return post(vxcloud_url_ + kSalesShift + "/leads/facets", body);
 }
 
 std::string Client::leadsQuota() {
-    return get(infinity_url_ + kSalesShift + "/leads/quota");
+    return get(vxcloud_url_ + kSalesShift + "/leads/quota");
 }
 
 std::string Client::leadsReveal(const std::string& pool_person_id) {
@@ -635,7 +635,7 @@ std::string Client::leadsReveal(const std::string& pool_person_id) {
     // the allowance is gone AND that nothing was charged for the attempt; a 410
     // means the person was erased, which is terminal rather than transient.
     std::string body = JsonBuilder().str("pool_person_id", pool_person_id).build();
-    return post(infinity_url_ + kSalesShift + "/leads/reveal", body);
+    return post(vxcloud_url_ + kSalesShift + "/leads/reveal", body);
 }
 
 std::string Client::leadsSave(const std::vector<std::string>& pool_person_ids) {
@@ -643,22 +643,22 @@ std::string Client::leadsSave(const std::vector<std::string>& pool_person_ids) {
     std::string body = JsonBuilder().strings("pool_person_ids", pool_person_ids).build();
     // Up to 200 snapshot rows in one transaction — more headroom than the
     // 30s default gives a batch write.
-    return post(infinity_url_ + kSalesShift + "/leads/save", body, {}, kLongTimeout);
+    return post(vxcloud_url_ + kSalesShift + "/leads/save", body, {}, kLongTimeout);
 }
 
 std::string Client::leadsPoolPerson(const std::string& pool_id) {
-    return get(infinity_url_ + kSalesShift + "/leads/pool/" + pool_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/pool/" + pool_id);
 }
 
 std::string Client::leadsCompany(const std::string& company_id) {
-    return get(infinity_url_ + kSalesShift + "/leads/company/" + company_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/company/" + company_id);
 }
 
 std::string Client::leadsList(const std::string& status, int limit) {
     // status is a slug (new|contacted|converted|…) and limit an int, so they go
     // into the query string as-is — the same shortcut salesshift_emails takes.
     // This SDK carries no percent-encoder.
-    std::string url = infinity_url_ + kSalesShift + "/leads";
+    std::string url = vxcloud_url_ + kSalesShift + "/leads";
     std::string sep = "?";
     if (!status.empty()) { url += sep + "status=" + status; sep = "&"; }
     if (limit > 0)       { url += sep + "limit=" + std::to_string(limit); }
@@ -666,7 +666,7 @@ std::string Client::leadsList(const std::string& status, int limit) {
 }
 
 std::string Client::leadsGet(const std::string& lead_id) {
-    return get(infinity_url_ + kSalesShift + "/leads/" + lead_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/" + lead_id);
 }
 
 std::string Client::leadsUpdate(const std::string& lead_id, const LeadUpdate& patch) {
@@ -680,14 +680,14 @@ std::string Client::leadsUpdate(const std::string& lead_id, const LeadUpdate& pa
     // tags", and dropping it would turn an intentional clear into a no-op.
     if (patch.tags)              b.strings("tags", *patch.tags);
     // PATCH has no public verb on this client; the transport already speaks it.
-    return do_request("PATCH", infinity_url_ + kSalesShift + "/leads/" + lead_id,
+    return do_request("PATCH", vxcloud_url_ + kSalesShift + "/leads/" + lead_id,
                       b.build(), {}, kDefaultTimeout).body;
 }
 
 std::string Client::leadsConvert(const std::string& lead_id,
                                  const std::string& lifecycle_stage) {
     std::string body = JsonBuilder().str_if("lifecycle_stage", lifecycle_stage).build();
-    return post(infinity_url_ + kSalesShift + "/leads/" + lead_id + "/convert", body,
+    return post(vxcloud_url_ + kSalesShift + "/leads/" + lead_id + "/convert", body,
                 {}, kLongTimeout);
 }
 
@@ -696,7 +696,7 @@ std::string Client::leadsBulkConvert(const std::vector<std::string>& lead_ids) {
     // holds and reveals nothing), so only the empty case is refused here.
     require_ids("leads.bulkConvert", lead_ids, 0);
     std::string body = JsonBuilder().strings("lead_ids", lead_ids).build();
-    return post(infinity_url_ + kSalesShift + "/leads/bulk-convert", body,
+    return post(vxcloud_url_ + kSalesShift + "/leads/bulk-convert", body,
                 {}, kLongTimeout);
 }
 
@@ -715,7 +715,7 @@ std::string Client::leadsConvertFromPool(const std::vector<std::string>& pool_pe
     // The caller must render converted / already_converted / skipped_no_quota /
     // skipped_no_email / skipped_erased from the reply. They add up to the ids
     // sent; showing only `converted` hides a partial spend.
-    return post(infinity_url_ + kSalesShift + "/leads/convert-from-pool", body,
+    return post(vxcloud_url_ + kSalesShift + "/leads/convert-from-pool", body,
                 {}, kLongTimeout);
 }
 
@@ -733,11 +733,11 @@ std::string Client::leadsErasure(const std::string& email, const std::string& re
         .str_if("reason", reason)
         .str_if("note", note)
         .build();
-    return post(infinity_url_ + kSalesShift + "/leads/erasure", body, {}, kLongTimeout);
+    return post(vxcloud_url_ + kSalesShift + "/leads/erasure", body, {}, kLongTimeout);
 }
 
 std::string Client::leadsSavedSearches() {
-    return get(infinity_url_ + kSalesShift + "/lead-searches");
+    return get(vxcloud_url_ + kSalesShift + "/lead-searches");
 }
 
 std::string Client::leadsEnrich(const std::string& domain,
@@ -748,7 +748,7 @@ std::string Client::leadsEnrich(const std::string& domain,
         .str_if("company_id", company_id)
         .str_if("domain", domain)
         .build();
-    return post(infinity_url_ + kSalesShift + "/leads/enrich", body);
+    return post(vxcloud_url_ + kSalesShift + "/leads/enrich", body);
 }
 
 std::string Client::leadsSaveSearch(const std::string& name, const LeadFilters& filters,
@@ -761,7 +761,7 @@ std::string Client::leadsSaveSearch(const std::string& name, const LeadFilters& 
         .raw("filters", encode_filters(filters))
         .boolean("is_shared", is_shared)
         .build();
-    return post(infinity_url_ + kSalesShift + "/lead-searches", body);
+    return post(vxcloud_url_ + kSalesShift + "/lead-searches", body);
 }
 
 }  // namespace vx

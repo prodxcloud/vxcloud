@@ -20,13 +20,13 @@ type Doer interface {
 // ErrInvalidKey is returned when the API key is malformed or rejected.
 var ErrInvalidKey = errors.New("auth: invalid api key")
 
-// Exchange trades an API key for a JWT pair against the Infinity control
-// plane. Endpoint: POST {infinityURL}/api/v1/auth/developer/keys/login.
+// Exchange trades an API key for a JWT pair against the VxCloud control
+// plane. Endpoint: POST {vxcloudURL}/api/v1/auth/developer/keys/login.
 //
 // Returns the parsed response, including resolved Username / Organization
 // / Workspace from the server (callers can omit username on input — the
 // server identifies the key holder).
-func Exchange(ctx context.Context, doer Doer, infinityURL, apiKey, username string) (*ExchangeResponse, error) {
+func Exchange(ctx context.Context, doer Doer, vxcloudURL, apiKey, username string) (*ExchangeResponse, error) {
 	if err := APIKey(apiKey).Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidKey, err)
 	}
@@ -36,7 +36,7 @@ func Exchange(ctx context.Context, doer Doer, infinityURL, apiKey, username stri
 	})
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPost,
-		strings.TrimRight(infinityURL, "/")+"/api/v1/auth/developer/keys/login",
+		strings.TrimRight(vxcloudURL, "/")+"/api/v1/auth/developer/keys/login",
 		bytes.NewReader(body),
 	)
 	if err != nil {

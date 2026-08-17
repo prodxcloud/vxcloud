@@ -126,7 +126,7 @@ func (f ContactFilter) query() string {
 
 // ListContacts returns one page plus the pagination envelope.
 func (c *Client) ListContacts(ctx context.Context, f ContactFilter) ([]Contact, Pagination, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts") + f.query()
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts") + f.query()
 	var raw struct {
 		Data       []Contact  `json:"data"`
 		Pagination Pagination `json:"pagination"`
@@ -142,7 +142,7 @@ func (c *Client) GetContact(ctx context.Context, id string) (*Contact, error) {
 	if id == "" {
 		return nil, errors.New("salesshift.GetContact: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+id)
 	var out Contact
 	if err := c.T.JSON(ctx, "salesshift.GetContact", "GET", url, nil, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.GetContact: %w", err)
@@ -171,7 +171,7 @@ func (c *Client) CreateContact(ctx context.Context, in NewContact) (*Contact, er
 	if in.Email == "" {
 		return nil, errors.New("salesshift.CreateContact: Email is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts")
 	var out Contact
 	if err := c.T.JSON(ctx, "salesshift.CreateContact", "POST", url, in, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.CreateContact: %w", err)
@@ -196,7 +196,7 @@ func (c *Client) UpdateContact(ctx context.Context, id string, p ContactPatch) (
 	if id == "" {
 		return nil, errors.New("salesshift.UpdateContact: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+id)
 	var out Contact
 	if err := c.T.JSON(ctx, "salesshift.UpdateContact", "PUT", url, p, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.UpdateContact: %w", err)
@@ -209,7 +209,7 @@ func (c *Client) DeleteContact(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("salesshift.DeleteContact: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+id)
 	if err := c.T.JSON(ctx, "salesshift.DeleteContact", "DELETE", url, nil, nil); err != nil {
 		return fmt.Errorf("salesshift.DeleteContact: %w", err)
 	}
@@ -241,7 +241,7 @@ func (c *Client) SendContactEmail(ctx context.Context, contactID string, in Cont
 	if in.Subject == "" || in.BodyHTML == "" {
 		return nil, errors.New("salesshift.SendContactEmail: Subject and BodyHTML are required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+contactID+"/send-email")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+contactID+"/send-email")
 	var out SendEmailResult
 	if err := c.T.JSON(ctx, "salesshift.SendContactEmail", "POST", url, in, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.SendContactEmail: %w", err)
@@ -254,7 +254,7 @@ func (c *Client) AddContactNote(ctx context.Context, contactID, content string) 
 	if contactID == "" || content == "" {
 		return errors.New("salesshift.AddContactNote: contactID and content are required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+contactID+"/notes")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+contactID+"/notes")
 	body := map[string]string{"content": content}
 	if err := c.T.JSON(ctx, "salesshift.AddContactNote", "POST", url, body, nil); err != nil {
 		return fmt.Errorf("salesshift.AddContactNote: %w", err)
@@ -276,7 +276,7 @@ func (c *Client) ContactActivities(ctx context.Context, contactID string) ([]Act
 	if contactID == "" {
 		return nil, errors.New("salesshift.ContactActivities: contactID is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/contacts/"+contactID+"/activities")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/"+contactID+"/activities")
 	var raw struct {
 		Data []Activity `json:"data"`
 	}
@@ -297,7 +297,7 @@ type ContactList struct {
 
 // ListContactLists returns this workspace's contact lists.
 func (c *Client) ListContactLists(ctx context.Context) ([]ContactList, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/lists")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/lists")
 	var raw struct {
 		Data []ContactList `json:"data"`
 	}

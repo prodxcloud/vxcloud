@@ -18,7 +18,7 @@
 //	c, _ := vxsdk.New(ctx,
 //	    vxsdk.WithAPIKey("xc_dev_xxxxxxxxxxxxxxxx"),
 //	    vxsdk.WithUsername("alice"),
-//	    vxsdk.WithInfinityURL(srv.URL()),
+//	    vxsdk.WithVxCloudURL(srv.URL()),
 //	    vxsdk.WithNodeURL(srv.URL()),
 //	)
 //	pipelines, err := c.CICD().Pipelines().List(ctx)

@@ -103,7 +103,7 @@ func (c *Client) ListSequences(ctx context.Context, q, status string, includeArc
 	if includeArchived {
 		v.Set("include_archived", "true")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences")
 	if len(v) > 0 {
 		url += "?" + v.Encode()
 	}
@@ -123,7 +123,7 @@ func (c *Client) GetSequence(ctx context.Context, id string) (*Sequence, error) 
 	if id == "" {
 		return nil, errors.New("salesshift.GetSequence: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id)
 	var raw struct {
 		Data Sequence `json:"data"`
 	}
@@ -165,7 +165,7 @@ func (c *Client) CreateSequence(ctx context.Context, in NewSequence) (*Sequence,
 	if in.Name == "" {
 		return nil, errors.New("salesshift.CreateSequence: Name is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences")
 	var raw struct {
 		Data Sequence `json:"data"`
 	}
@@ -183,7 +183,7 @@ func (c *Client) AddStep(ctx context.Context, sequenceID string, step NewStep) (
 	if step.StepType == "" {
 		step.StepType = "email"
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+sequenceID+"/steps")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+sequenceID+"/steps")
 	var raw struct {
 		Data SequenceStep `json:"data"`
 	}
@@ -198,7 +198,7 @@ func (c *Client) DeleteSequence(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("salesshift.DeleteSequence: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id)
 	if err := c.T.JSON(ctx, "salesshift.DeleteSequence", "DELETE", url, nil, nil); err != nil {
 		return fmt.Errorf("salesshift.DeleteSequence: %w", err)
 	}
@@ -209,7 +209,7 @@ func (c *Client) sequenceAction(ctx context.Context, op, id, action string) (*Se
 	if id == "" {
 		return nil, fmt.Errorf("salesshift.%s: id is required", op)
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id+"/"+action)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/"+action)
 	var raw struct {
 		Data Sequence `json:"data"`
 	}
@@ -266,7 +266,7 @@ func (c *Client) EnrollInSequence(ctx context.Context, id string, contactIDs []s
 	if len(contactIDs) == 0 {
 		return nil, errors.New("salesshift.EnrollInSequence: contactIDs is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id+"/enroll")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/enroll")
 	var out SequenceEnrollResult
 	body := map[string]any{"contact_ids": contactIDs}
 	if err := c.T.JSON(ctx, "salesshift.EnrollInSequence", "POST", url, body, &out); err != nil {
@@ -295,7 +295,7 @@ func (c *Client) SequenceEnrollments(ctx context.Context, id string) ([]Enrollme
 	if id == "" {
 		return nil, errors.New("salesshift.SequenceEnrollments: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id+"/enrollments")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/enrollments")
 	var raw struct {
 		Data []Enrollment `json:"data"`
 	}
@@ -350,7 +350,7 @@ func (c *Client) Analytics(ctx context.Context, id string) (*SequenceAnalytics, 
 	if id == "" {
 		return nil, errors.New("salesshift.Analytics: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/"+id+"/analytics")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/analytics")
 	var raw struct {
 		Data SequenceAnalytics `json:"data"`
 	}
@@ -371,7 +371,7 @@ type DispatchResult struct {
 // waiting for the scheduler. Useful in tests and after a paused sequence is
 // resumed; the scheduler still owns the normal cadence.
 func (c *Client) DispatchNow(ctx context.Context) (*DispatchResult, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/sequences/dispatch-now")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/dispatch-now")
 	var out DispatchResult
 	if err := c.T.JSON(ctx, "salesshift.DispatchNow", "POST", url, map[string]any{}, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.DispatchNow: %w", err)

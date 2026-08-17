@@ -4,7 +4,7 @@
  * gating, daily caps + warmup ramp, open/click tracking, and the
  * SendGrid-style Kafka event stream (salesshift.email.events).
  *
- * Endpoints (infinity control plane):
+ * Endpoints (vxcloud control plane):
  *   POST /api/v1/salesshift/email/send
  *   GET  /api/v1/salesshift/emails
  *   GET  /api/v1/salesshift/stats
@@ -109,7 +109,7 @@ export class SalesShift {
   /** Health of the tenant-node Go email worker. */
   async getWorkerHealth(): Promise<WorkerHealth> {
     // The worker runs on the tenant node, not the control plane. Without this
-    // the request goes to infinityURL (the transport's default base) and 404s,
+    // the request goes to vxcloudURL (the transport's default base) and 404s,
     // which reads as "worker is down" when it is actually healthy. Python's
     // client.ensure_node_url() does the same thing.
     if (this.ensureNode) await this.ensureNode();

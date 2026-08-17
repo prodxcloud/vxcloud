@@ -5,6 +5,16 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.8.17
+
+- Re-pinned to `vxsdk==2026.8.17` (base + `[async]` extra).
+- **BREAKING (inherited from `vxsdk`):** the `INFINITY_*` environment variables
+  are removed, not deprecated — nothing reads them, so a stale config falls back
+  to defaults silently instead of erroring. `VX_INFINITY_URL` / `INFINITY_URL`
+  collapse into `VXCLOUD_URL`; `INFINITY_API_URL` → `VXCLOUD_API_URL`;
+  `INFINITY_WS_URL` → `VXCLOUD_WS_URL`. The node vars `VX_NODE_URL` / `NODE_URL`
+  are unchanged.
+
 ## 2026.8.14
 
 - Re-pinned to `vxsdk==2026.8.14` (base + `[async]` extra). No code changes.

@@ -85,6 +85,8 @@ export {
   SalesShiftBilling, SalesShiftSocial, SalesShiftOpportunities,
   SalesShiftTasks, SalesShiftCampaigns,
   type Plan, type PlanQuotas, type Subscription, type Invoice,
+  type ManagedBy, type Entitlements, type EntitlementQuotas,
+  type SelfHostedStatus, type NodeRegistration,
   type SocialChannel, type SocialDelivery, type SocialPost, type DistributeJob,
   type Opportunity, type Task, type CampaignRecipient,
 } from './salesshift-platform.js';

@@ -2,7 +2,7 @@
  * Auth state + API-key validation + JWT exchange.
  *
  * Same wire contract as services/sdk/auth (Go) and vxsdk.py:
- *   POST {infinity}/api/v1/auth/developer/keys/login
+ *   POST {vxcloud}/api/v1/auth/developer/keys/login
  *     Headers: X-API-Key: xc_…
  *     Body:    { username, key }
  *   →
@@ -71,12 +71,12 @@ export function authHeaders(state: AuthState): Record<string, string> {
  */
 export async function exchangeKey(
   fetchImpl: typeof fetch,
-  infinityURL: string,
+  vxcloudURL: string,
   apiKey: string,
   username: string,
   signal?: AbortSignal,
 ): Promise<{ jwt: string; refreshToken: string; expiresAt?: number; user?: AuthState['user'] }> {
-  const res = await fetchImpl(`${infinityURL.replace(/\/+$/, '')}/api/v1/auth/developer/keys/login`, {
+  const res = await fetchImpl(`${vxcloudURL.replace(/\/+$/, '')}/api/v1/auth/developer/keys/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

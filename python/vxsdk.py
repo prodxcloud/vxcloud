@@ -51,9 +51,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-__version__ = "2026.8.14"
+__version__ = "2026.8.17"
 
-DEFAULT_INFINITY_URL = "https://api.vxcloud.io"
+DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io"
 DEFAULT_TIMEOUT = 30
 DEFAULT_LONG_TIMEOUT = 600  # for installs / deploys
 
@@ -1606,8 +1606,8 @@ class MetalDB(_Resource):
 class Nodes(_Resource):
     def list(self) -> list[dict[str, Any]]:
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/auth/nodes/", op="nodes.list",
-            target="infinity",
+            "GET", self.client.vxcloud_url + "/api/v1/auth/nodes/", op="nodes.list",
+            target="vxcloud",
         )
 
     def default(self) -> dict[str, Any] | None:
@@ -1624,8 +1624,8 @@ class Nodes(_Resource):
             raise ValueError("nodes.set_default: node_id is required")
         return self.client._json(
             "POST",
-            self.client.infinity_url + f"/api/v1/auth/nodes/{node_id}/set-default",
-            op="nodes.set_default", json_body={}, target="infinity",
+            self.client.vxcloud_url + f"/api/v1/auth/nodes/{node_id}/set-default",
+            op="nodes.set_default", json_body={}, target="vxcloud",
         )
 
     def register_self_hosted(
@@ -1669,8 +1669,8 @@ class Nodes(_Resource):
             if v:
                 body[k] = v
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/auth/nodes/self-hosted",
-            op="nodes.register_self_hosted", json_body=body, target="infinity",
+            "POST", self.client.vxcloud_url + "/api/v1/auth/nodes/self-hosted",
+            op="nodes.register_self_hosted", json_body=body, target="vxcloud",
         )
 
     def delete(self, node_id: int | str) -> dict[str, Any]:
@@ -1679,8 +1679,8 @@ class Nodes(_Resource):
         if not node_id:
             raise ValueError("nodes.delete: node_id is required")
         return self.client._json(
-            "DELETE", self.client.infinity_url + f"/api/v1/auth/nodes/{node_id}",
-            op="nodes.delete", target="infinity",
+            "DELETE", self.client.vxcloud_url + f"/api/v1/auth/nodes/{node_id}",
+            op="nodes.delete", target="vxcloud",
         )
 
     def update(self, node_id: int | str, **fields: Any) -> dict[str, Any]:
@@ -1718,8 +1718,8 @@ class Nodes(_Resource):
                     d = d[len(p):]
             body["custom_domain_name"] = d.rstrip("/")
         return self.client._json(
-            "PATCH", self.client.infinity_url + f"/api/v1/auth/nodes/{node_id}",
-            op="nodes.update", json_body=body, target="infinity",
+            "PATCH", self.client.vxcloud_url + f"/api/v1/auth/nodes/{node_id}",
+            op="nodes.update", json_body=body, target="vxcloud",
         )
 
 
@@ -4094,7 +4094,7 @@ class SalesShift(_Resource):
     * **An unrevealed address is a mask, not an address** — see
       :func:`is_masked_email`.
 
-    Control-plane endpoints (infinity): ``/api/v1/salesshift/*``
+    Control-plane endpoints (vxcloud): ``/api/v1/salesshift/*``
     Tenant-node endpoint: ``/api/v2/salesshift/email/health``
     """
 
@@ -4123,24 +4123,24 @@ class SalesShift(_Resource):
         if last_name:
             payload["last_name"] = last_name
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/email/send",
-            op="salesshift.send_email", json_body=payload, target="infinity",
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/email/send",
+            op="salesshift.send_email", json_body=payload, target="vxcloud",
         )
 
     def list_emails(self, status: str = "") -> list[dict[str, Any]]:
         """Tracked outbound emails with engagement state (opens/clicks/replies)."""
-        url = self.client.infinity_url + "/api/v1/salesshift/emails"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/emails"
         if status:
             url += f"?status={status}"
         body = self.client._json("GET", url, op="salesshift.list_emails",
-                                 target="infinity")
+                                 target="vxcloud")
         return list(body.get("data") or [])
 
     def get_stats(self) -> dict[str, Any]:
         """Live dashboard stats (contacts, deals, email funnel)."""
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/stats",
-            op="salesshift.get_stats", target="infinity",
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/stats",
+            op="salesshift.get_stats", target="vxcloud",
         )
 
     def get_worker_health(self) -> dict[str, Any]:
@@ -4158,17 +4158,17 @@ class SalesShift(_Resource):
                timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
         """One call against the leads API.
 
-        Every leads endpoint lives on the **Infinity control plane**, never on
-        the tenant node, so ``path`` is joined to ``infinity_url`` exactly as
+        Every leads endpoint lives on the **VxCloud control plane**, never on
+        the tenant node, so ``path`` is joined to ``vxcloud_url`` exactly as
         the email methods above do. Resolving these against ``node_url`` would
         404 on a healthy system and look like a missing feature.
 
         Wraps 402 and 410 in named errors — see :func:`_leads_error`.
         """
         try:
-            return self.client._json(method, self.client.infinity_url + path,
+            return self.client._json(method, self.client.vxcloud_url + path,
                                      op=op, json_body=json_body,
-                                     target="infinity", timeout=timeout)
+                                     target="vxcloud", timeout=timeout)
         except VxError as exc:
             named = _leads_error(op, exc)
             if named is exc:
@@ -4677,8 +4677,8 @@ class SalesShift(_Resource):
     def list_campaigns(self) -> list[dict[str, Any]]:
         """Every campaign in the workspace, newest first."""
         body = self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/campaigns",
-            op="salesshift.list_campaigns", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/campaigns",
+            op="salesshift.list_campaigns", target="vxcloud")
         return list(body.get("data") or [])
 
     def create_campaign(self, name: str, subject: str, body_html: str, *,
@@ -4716,8 +4716,8 @@ class SalesShift(_Resource):
             payload["reply_to"] = reply_to
 
         body = self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/campaigns",
-            op="salesshift.create_campaign", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/campaigns",
+            op="salesshift.create_campaign", target="vxcloud", json_body=payload)
         return body.get("data") or body
 
     def get_campaign(self, campaign_id: str) -> dict[str, Any]:
@@ -4730,8 +4730,8 @@ class SalesShift(_Resource):
         if not campaign_id:
             raise VxValidationError("salesshift.get_campaign", "campaign_id is required")
         body = self.client._json(
-            "GET", f"{self.client.infinity_url}/api/v1/salesshift/campaigns/{campaign_id}",
-            op="salesshift.get_campaign", target="infinity")
+            "GET", f"{self.client.vxcloud_url}/api/v1/salesshift/campaigns/{campaign_id}",
+            op="salesshift.get_campaign", target="vxcloud")
         return {
             "campaign": body.get("data") or {},
             "recipients": list(body.get("recipients") or []),
@@ -4751,8 +4751,8 @@ class SalesShift(_Resource):
         if send_at:
             payload["send_at"] = send_at
         body = self.client._json(
-            "POST", f"{self.client.infinity_url}/api/v1/salesshift/campaigns/{campaign_id}/send",
-            op="salesshift.send_campaign", target="infinity", json_body=payload)
+            "POST", f"{self.client.vxcloud_url}/api/v1/salesshift/campaigns/{campaign_id}/send",
+            op="salesshift.send_campaign", target="vxcloud", json_body=payload)
         return body.get("data") or body
 
     def wait_for_campaign(self, campaign_id: str, *, timeout: int = 120,
@@ -4783,8 +4783,8 @@ class SalesShift(_Resource):
     def billing_plans(self) -> dict[str, Any]:
         """Published tiers plus whether checkout is possible on this deployment."""
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/plans",
-            op="salesshift.billing_plans", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/billing/plans",
+            op="salesshift.billing_plans", target="vxcloud")
 
     def billing_subscription(self) -> dict[str, Any]:
         """This workspace's plan, seats and pooled allowance.
@@ -4792,15 +4792,15 @@ class SalesShift(_Resource):
         A quota of ``None`` in ``allowance`` means unlimited — never zero.
         """
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/subscription",
-            op="salesshift.billing_subscription", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/billing/subscription",
+            op="salesshift.billing_subscription", target="vxcloud")
 
     def billing_invoices(self) -> dict[str, Any]:
         """Invoices from Stripe. A comped workspace has no payment account, so
         this is an empty list with ``reason`` set — not an error."""
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/billing/invoices",
-            op="salesshift.billing_invoices", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/billing/invoices",
+            op="salesshift.billing_invoices", target="vxcloud")
 
     def billing_checkout(self, plan_code: str, seats: int = 1) -> dict[str, Any]:
         """Open a Stripe Checkout session. Nothing is charged until it is
@@ -4808,9 +4808,94 @@ class SalesShift(_Resource):
         if not plan_code:
             raise VxValidationError("salesshift.billing_checkout", "plan_code is required")
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/billing/checkout",
-            op="salesshift.billing_checkout", target="infinity",
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/billing/checkout",
+            op="salesshift.billing_checkout", target="vxcloud",
             json_body={"plan_code": plan_code, "seats": max(1, int(seats))})
+
+    def billing_entitlements(self) -> dict[str, Any]:
+        """What this workspace may do, without the billing detail.
+
+        Separate from :meth:`billing_subscription` because the answer is needed
+        far more often than the money is, and it costs no Stripe call.
+
+        Returns ``plan_code``, ``plan_name``, ``status``, ``source``, ``seats``,
+        ``is_free``, ``managed`` (``compute``/``sending``/``ai``), ``allowance``
+        (``emails``/``reveals``/``ai``/``mailboxes``/``contacts``/``users``,
+        already pooled across seats, ``None`` = unlimited) and ``self_hosted``.
+
+        Read ``managed``, never a quota of zero. On the free Self-Hosted plan
+        ``allowance["emails"]`` is 0 and that does not mean "may not send" — it
+        means we are not the one sending, and ``managed["sending"] is False`` is
+        what says so. A workspace with no subscription at all resolves here to
+        the free tier, deliberately: never to a lock-out.
+        """
+        return self.client._json(
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/billing/entitlements",
+            op="salesshift.billing_entitlements", target="vxcloud")
+
+    def billing_activate_plan(self, plan_code: str = "self_hosted") -> dict[str, Any]:
+        """Put this workspace on a free plan. No card, no Stripe, no email.
+
+        Free plans only — the server refuses any code not flagged free, so this
+        cannot become a way to grant a paid tier by posting a different one. It
+        also refuses to *downgrade* a live non-free plan, bought or granted:
+        that has to be given up through ``/cancel``, which tells Stripe when
+        there is a Stripe to tell.
+
+        Returns ``{"subscription": …}``, with the new ``entitlements`` nested
+        inside it.
+        """
+        if not plan_code:
+            raise VxValidationError("salesshift.billing_activate_plan", "plan_code is required")
+        return self.client._json(
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/billing/activate",
+            op="salesshift.billing_activate_plan", target="vxcloud",
+            json_body={"plan_code": plan_code})
+
+    def billing_self_hosted(self) -> dict[str, Any]:
+        """The registered node, a live probe of it, and how to bring one up.
+
+        ``live`` is ``None`` when no node is registered, and reports
+        ``{"reachable": False, "error": …}`` rather than raising when one is
+        registered but down — a node that is down is still the registered node.
+
+        ``install["accepts"]`` is every value a node may report as its
+        ``tenant_id`` for this workspace: the workspace UUID always, plus the
+        workspace NAME when that name is unique across all organizations.
+        """
+        return self.client._json(
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/billing/self-hosted",
+            op="salesshift.billing_self_hosted", target="vxcloud")
+
+    def billing_register_node(self, host: str) -> dict[str, Any]:
+        """Point this workspace at its own node, after the node proves whose it is.
+
+        The server does not take the caller's word for it: it calls
+        ``GET {host}/health`` and requires the node to report a ``tenant_id``
+        listed in :meth:`billing_self_hosted`'s ``install["accepts"]``. Setting
+        that requires shell access to the machine, so a node that answers with
+        this workspace's id is a node this workspace controls.
+
+        HTTPS is required; ``http://`` is accepted only for localhost. The
+        refusals are 400 (nothing identified, or plaintext), 403 (the node
+        identifies as another workspace) and 502 (unreachable).
+        """
+        if not host:
+            raise VxValidationError("salesshift.billing_register_node", "host is required")
+        return self.client._json(
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/billing/self-hosted/node",
+            op="salesshift.billing_register_node", target="vxcloud",
+            json_body={"host": host})
+
+    def billing_detach_node(self) -> dict[str, Any]:
+        """Unregister the node.
+
+        On a self-hosted plan this stops sending and agents until another node
+        is registered — it is not a cosmetic change.
+        """
+        return self.client._json(
+            "DELETE", self.client.vxcloud_url + "/api/v1/salesshift/billing/self-hosted/node",
+            op="salesshift.billing_detach_node", target="vxcloud")
 
     # ── social distribution ──
 
@@ -4822,14 +4907,14 @@ class SalesShift(_Resource):
         published is the one genuinely misleading thing this client can do.
         """
         return self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/social/channels",
-            op="salesshift.social_channels", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/social/channels",
+            op="salesshift.social_channels", target="vxcloud")
 
     def social_posts(self, status: str = "") -> list[dict[str, Any]]:
-        url = self.client.infinity_url + "/api/v1/salesshift/social/posts"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/social/posts"
         if status:
             url += f"?status={status}"
-        body = self.client._json("GET", url, op="salesshift.social_posts", target="infinity")
+        body = self.client._json("GET", url, op="salesshift.social_posts", target="vxcloud")
         return list(body.get("posts") or [])
 
     def create_social_post(self, content: str, *, title: str = "", link_url: str = "",
@@ -4847,8 +4932,8 @@ class SalesShift(_Resource):
             "scheduled_at": scheduled_at or None,
         }
         body = self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/social/posts",
-            op="salesshift.create_social_post", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/social/posts",
+            op="salesshift.create_social_post", target="vxcloud", json_body=payload)
         return body.get("post") or {}
 
     def distribute_post(self, post_id: str, concurrency: int = 0) -> dict[str, Any]:
@@ -4860,15 +4945,15 @@ class SalesShift(_Resource):
         if not post_id:
             raise VxValidationError("salesshift.distribute_post", "post_id is required")
         return self.client._json(
-            "POST", f"{self.client.infinity_url}/api/v1/salesshift/social/posts/{post_id}/distribute",
-            op="salesshift.distribute_post", target="infinity",
+            "POST", f"{self.client.vxcloud_url}/api/v1/salesshift/social/posts/{post_id}/distribute",
+            op="salesshift.distribute_post", target="vxcloud",
             json_body={"concurrency": int(concurrency)}, timeout=180)
 
     def webmaster_inspect(self, url: str) -> dict[str, Any]:
         """Fetch a live page and report what a crawler finds on it."""
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/social/webmaster/inspect",
-            op="salesshift.webmaster_inspect", target="infinity", json_body={"url": url})
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/social/webmaster/inspect",
+            op="salesshift.webmaster_inspect", target="vxcloud", json_body={"url": url})
 
     # ── opportunities (the cross-tenant signal pool) ──
 
@@ -4881,11 +4966,11 @@ class SalesShift(_Resource):
         """
         from urllib.parse import quote
         pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
-        url = self.client.infinity_url + "/api/v1/salesshift/opportunities"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/opportunities"
         if pairs:
             url += "?" + "&".join(pairs)
         return self.client._json("GET", url, op="salesshift.list_opportunities",
-                                 target="infinity")
+                                 target="vxcloud")
 
     def push_opportunity_to_lead(self, opportunity_id: str) -> dict[str, Any]:
         """Copy the signal's published contact into this workspace's CRM.
@@ -4898,8 +4983,8 @@ class SalesShift(_Resource):
                                     "opportunity_id is required")
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}/push-to-lead",
-            op="salesshift.push_opportunity_to_lead", target="infinity", json_body={})
+            f"{self.client.vxcloud_url}/api/v1/salesshift/opportunities/{opportunity_id}/push-to-lead",
+            op="salesshift.push_opportunity_to_lead", target="vxcloud", json_body={})
 
     # ── tasks ──
 
@@ -4908,10 +4993,10 @@ class SalesShift(_Resource):
         ``priority``, ``assignee_id``, ``q`` and ``limit``."""
         from urllib.parse import quote
         pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
-        url = self.client.infinity_url + "/api/v1/salesshift/tasks"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/tasks"
         if pairs:
             url += "?" + "&".join(pairs)
-        return self.client._json("GET", url, op="salesshift.list_tasks", target="infinity")
+        return self.client._json("GET", url, op="salesshift.list_tasks", target="vxcloud")
 
     def create_task(self, title: str, *, description: str = "", goal: str = "",
                     due_at: str = "", task_type: str = "todo",
@@ -4938,8 +5023,8 @@ class SalesShift(_Resource):
         if assignee_id is not None:
             payload["assignee_id"] = int(assignee_id)
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/tasks",
-            op="salesshift.create_task", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/tasks",
+            op="salesshift.create_task", target="vxcloud", json_body=payload)
 
     def update_task(self, task_id: str, **fields: Any) -> dict[str, Any]:
         """Partial update. Only the keys you pass are sent, so moving a due
@@ -4963,8 +5048,8 @@ class SalesShift(_Resource):
         if not payload:
             raise VxValidationError("salesshift.update_task", "nothing to update")
         return self.client._json(
-            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/tasks/{task_id}",
-            op="salesshift.update_task", target="infinity", json_body=payload)
+            "PUT", f"{self.client.vxcloud_url}/api/v1/salesshift/tasks/{task_id}",
+            op="salesshift.update_task", target="vxcloud", json_body=payload)
 
     def complete_task(self, task_id: str) -> dict[str, Any]:
         """Mark a task done. Progress goes to 100 and ``completed_at`` is set."""
@@ -4975,8 +5060,8 @@ class SalesShift(_Resource):
         if not task_id:
             raise VxValidationError("salesshift.delete_task", "task_id is required")
         self.client._json(
-            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/tasks/{task_id}",
-            op="salesshift.delete_task", target="infinity")
+            "DELETE", f"{self.client.vxcloud_url}/api/v1/salesshift/tasks/{task_id}",
+            op="salesshift.delete_task", target="vxcloud")
 
     # ── opportunities: the send half ──
 
@@ -4987,8 +5072,8 @@ class SalesShift(_Resource):
                                     "opportunity_id is required")
         return self.client._json(
             "GET",
-            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}",
-            op="salesshift.get_opportunity", target="infinity")
+            f"{self.client.vxcloud_url}/api/v1/salesshift/opportunities/{opportunity_id}",
+            op="salesshift.get_opportunity", target="vxcloud")
 
     def post_opportunity(self, title: str, description: str, *,
                          category: str = "", company_name: str = "",
@@ -5021,8 +5106,8 @@ class SalesShift(_Resource):
         if budget_max is not None:
             payload["budget_max"] = budget_max
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/opportunities",
-            op="salesshift.post_opportunity", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/opportunities",
+            op="salesshift.post_opportunity", target="vxcloud", json_body=payload)
 
     def apply_to_opportunity(self, opportunity_id: str, message: str, *,
                              proposed_rate: str = "") -> dict[str, Any]:
@@ -5045,8 +5130,8 @@ class SalesShift(_Resource):
             payload["proposed_rate"] = proposed_rate
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}/apply",
-            op="salesshift.apply_to_opportunity", target="infinity", json_body=payload)
+            f"{self.client.vxcloud_url}/api/v1/salesshift/opportunities/{opportunity_id}/apply",
+            op="salesshift.apply_to_opportunity", target="vxcloud", json_body=payload)
 
     def save_opportunity(self, opportunity_id: str, saved: bool = True) -> dict[str, Any]:
         """Save (or un-save) a signal for this workspace only."""
@@ -5064,8 +5149,8 @@ class SalesShift(_Resource):
             raise VxValidationError(op, "opportunity_id is required")
         return self.client._json(
             "PATCH",
-            f"{self.client.infinity_url}/api/v1/salesshift/opportunities/{opportunity_id}",
-            op=op, target="infinity", json_body=body)
+            f"{self.client.vxcloud_url}/api/v1/salesshift/opportunities/{opportunity_id}",
+            op=op, target="vxcloud", json_body=body)
 
     # ── contacts: the only mailable records ──
 
@@ -5078,19 +5163,19 @@ class SalesShift(_Resource):
         """
         from urllib.parse import quote
         pairs = [f"{k}={quote(str(v))}" for k, v in filters.items() if v not in (None, "", 0, False)]
-        url = self.client.infinity_url + "/api/v1/salesshift/contacts"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/contacts"
         if pairs:
             url += "?" + "&".join(pairs)
         return self.client._json("GET", url, op="salesshift.list_contacts",
-                                 target="infinity")
+                                 target="vxcloud")
 
     def get_contact(self, contact_id: str) -> dict[str, Any]:
         """One contact in full."""
         if not contact_id:
             raise VxValidationError("salesshift.get_contact", "contact_id is required")
         return self.client._json(
-            "GET", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
-            op="salesshift.get_contact", target="infinity")
+            "GET", f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.get_contact", target="vxcloud")
 
     def create_contact(self, email: str, **fields: Any) -> dict[str, Any]:
         """Create a contact.
@@ -5103,8 +5188,8 @@ class SalesShift(_Resource):
         payload = {"email": email}
         payload.update({k: v for k, v in fields.items() if v not in (None, "")})
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/contacts",
-            op="salesshift.create_contact", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/contacts",
+            op="salesshift.create_contact", target="vxcloud", json_body=payload)
 
     def update_contact(self, contact_id: str, **fields: Any) -> dict[str, Any]:
         """Partial update of a contact."""
@@ -5114,16 +5199,16 @@ class SalesShift(_Resource):
         if not payload:
             raise VxValidationError("salesshift.update_contact", "nothing to update")
         return self.client._json(
-            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
-            op="salesshift.update_contact", target="infinity", json_body=payload)
+            "PUT", f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.update_contact", target="vxcloud", json_body=payload)
 
     def delete_contact(self, contact_id: str) -> None:
         """Delete a contact and its activity."""
         if not contact_id:
             raise VxValidationError("salesshift.delete_contact", "contact_id is required")
         self.client._json(
-            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}",
-            op="salesshift.delete_contact", target="infinity")
+            "DELETE", f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}",
+            op="salesshift.delete_contact", target="vxcloud")
 
     def send_contact_email(self, contact_id: str, subject: str, body_html: str, *,
                            from_email: str = "", from_name: str = "",
@@ -5148,8 +5233,8 @@ class SalesShift(_Resource):
                 payload[key] = value
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/send-email",
-            op="salesshift.send_contact_email", target="infinity", json_body=payload)
+            f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}/send-email",
+            op="salesshift.send_contact_email", target="vxcloud", json_body=payload)
 
     def add_contact_note(self, contact_id: str, content: str) -> dict[str, Any]:
         """Attach a note, which also stamps ``last_activity``."""
@@ -5158,8 +5243,8 @@ class SalesShift(_Resource):
                                     "contact_id and content are required")
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/notes",
-            op="salesshift.add_contact_note", target="infinity",
+            f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}/notes",
+            op="salesshift.add_contact_note", target="vxcloud",
             json_body={"content": content})
 
     def contact_activities(self, contact_id: str) -> list[dict[str, Any]]:
@@ -5169,27 +5254,27 @@ class SalesShift(_Resource):
                                     "contact_id is required")
         out = self.client._json(
             "GET",
-            f"{self.client.infinity_url}/api/v1/salesshift/contacts/{contact_id}/activities",
-            op="salesshift.contact_activities", target="infinity")
+            f"{self.client.vxcloud_url}/api/v1/salesshift/contacts/{contact_id}/activities",
+            op="salesshift.contact_activities", target="vxcloud")
         return out.get("data", []) if isinstance(out, dict) else []
 
     def list_contact_lists(self) -> list[dict[str, Any]]:
         """This workspace's contact lists."""
         out = self.client._json(
-            "GET", self.client.infinity_url + "/api/v1/salesshift/lists",
-            op="salesshift.list_contact_lists", target="infinity")
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/lists",
+            op="salesshift.list_contact_lists", target="vxcloud")
         return out.get("data", []) if isinstance(out, dict) else []
 
     # ── workflows: the /automations canvas ──
 
     def list_workflows(self, status: str = "") -> list[dict[str, Any]]:
         """Every workflow, optionally filtered by ``draft``/``active``/``paused``."""
-        url = self.client.infinity_url + "/api/v1/salesshift/workflows"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/workflows"
         if status:
             from urllib.parse import quote
             url += f"?status={quote(status)}"
         out = self.client._json("GET", url, op="salesshift.list_workflows",
-                                target="infinity")
+                                target="vxcloud")
         return out.get("data", []) if isinstance(out, dict) else []
 
     def get_workflow(self, workflow_id: str) -> dict[str, Any]:
@@ -5197,8 +5282,8 @@ class SalesShift(_Resource):
         if not workflow_id:
             raise VxValidationError("salesshift.get_workflow", "workflow_id is required")
         out = self.client._json(
-            "GET", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
-            op="salesshift.get_workflow", target="infinity")
+            "GET", f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.get_workflow", target="vxcloud")
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def create_workflow(self, name: str, *, description: str = "",
@@ -5216,8 +5301,8 @@ class SalesShift(_Resource):
         if graph is not None:
             payload["graph"] = graph
         out = self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/workflows",
-            op="salesshift.create_workflow", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/workflows",
+            op="salesshift.create_workflow", target="vxcloud", json_body=payload)
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def update_workflow(self, workflow_id: str, **fields: Any) -> dict[str, Any]:
@@ -5229,8 +5314,8 @@ class SalesShift(_Resource):
         if not payload:
             raise VxValidationError("salesshift.update_workflow", "nothing to update")
         out = self.client._json(
-            "PUT", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
-            op="salesshift.update_workflow", target="infinity", json_body=payload)
+            "PUT", f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.update_workflow", target="vxcloud", json_body=payload)
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def delete_workflow(self, workflow_id: str) -> None:
@@ -5239,8 +5324,8 @@ class SalesShift(_Resource):
             raise VxValidationError("salesshift.delete_workflow",
                                     "workflow_id is required")
         self.client._json(
-            "DELETE", f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}",
-            op="salesshift.delete_workflow", target="infinity")
+            "DELETE", f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}",
+            op="salesshift.delete_workflow", target="vxcloud")
 
     def _workflow_action(self, workflow_id: str, action: str) -> dict[str, Any]:
         if not workflow_id:
@@ -5248,8 +5333,8 @@ class SalesShift(_Resource):
                                     "workflow_id is required")
         out = self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/{action}",
-            op=f"salesshift.{action}_workflow", target="infinity", json_body={})
+            f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}/{action}",
+            op=f"salesshift.{action}_workflow", target="vxcloud", json_body={})
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def activate_workflow(self, workflow_id: str) -> dict[str, Any]:
@@ -5273,8 +5358,8 @@ class SalesShift(_Resource):
                                     "workflow_id is required")
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/validate",
-            op="salesshift.validate_workflow", target="infinity", json_body={})
+            f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}/validate",
+            op="salesshift.validate_workflow", target="vxcloud", json_body={})
 
     def test_run_workflow(self, workflow_id: str, *, contact_id: str = "",
                           dry_run: bool = True) -> dict[str, Any]:
@@ -5292,8 +5377,8 @@ class SalesShift(_Resource):
             payload["contact_id"] = contact_id
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/test-run",
-            op="salesshift.test_run_workflow", target="infinity", json_body=payload)
+            f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}/test-run",
+            op="salesshift.test_run_workflow", target="vxcloud", json_body=payload)
 
     def enroll_in_workflow(self, workflow_id: str,
                            contact_ids: list[str]) -> dict[str, Any]:
@@ -5307,8 +5392,8 @@ class SalesShift(_Resource):
                                     "contact_ids is required")
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/enroll",
-            op="salesshift.enroll_in_workflow", target="infinity",
+            f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}/enroll",
+            op="salesshift.enroll_in_workflow", target="vxcloud",
             json_body={"contact_ids": list(contact_ids)})
 
     def workflow_runs(self, workflow_id: str) -> list[dict[str, Any]]:
@@ -5318,8 +5403,8 @@ class SalesShift(_Resource):
                                     "workflow_id is required")
         out = self.client._json(
             "GET",
-            f"{self.client.infinity_url}/api/v1/salesshift/workflows/{workflow_id}/runs",
-            op="salesshift.workflow_runs", target="infinity")
+            f"{self.client.vxcloud_url}/api/v1/salesshift/workflows/{workflow_id}/runs",
+            op="salesshift.workflow_runs", target="vxcloud")
         return out.get("data", []) if isinstance(out, dict) else []
 
     # ── sequences: multi-step outbound ──
@@ -5335,11 +5420,11 @@ class SalesShift(_Resource):
             pairs.append(f"status={quote(status)}")
         if include_archived:
             pairs.append("include_archived=true")
-        url = self.client.infinity_url + "/api/v1/salesshift/sequences"
+        url = self.client.vxcloud_url + "/api/v1/salesshift/sequences"
         if pairs:
             url += "?" + "&".join(pairs)
         return self.client._json("GET", url, op="salesshift.list_sequences",
-                                 target="infinity")
+                                 target="vxcloud")
 
     def get_sequence(self, sequence_id: str) -> dict[str, Any]:
         """One sequence with its step timeline. List rows carry
@@ -5347,8 +5432,8 @@ class SalesShift(_Resource):
         if not sequence_id:
             raise VxValidationError("salesshift.get_sequence", "sequence_id is required")
         out = self.client._json(
-            "GET", f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}",
-            op="salesshift.get_sequence", target="infinity")
+            "GET", f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}",
+            op="salesshift.get_sequence", target="vxcloud")
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def create_sequence(self, name: str, *, description: str = "",
@@ -5373,8 +5458,8 @@ class SalesShift(_Resource):
                 for i, s in enumerate(steps)
             ]
         out = self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/sequences",
-            op="salesshift.create_sequence", target="infinity", json_body=payload)
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/sequences",
+            op="salesshift.create_sequence", target="vxcloud", json_body=payload)
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def add_sequence_step(self, sequence_id: str, *, subject: str = "",
@@ -5391,8 +5476,8 @@ class SalesShift(_Resource):
             payload["body_html"] = body_html
         out = self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/steps",
-            op="salesshift.add_sequence_step", target="infinity", json_body=payload)
+            f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}/steps",
+            op="salesshift.add_sequence_step", target="vxcloud", json_body=payload)
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def _sequence_action(self, sequence_id: str, action: str) -> dict[str, Any]:
@@ -5401,8 +5486,8 @@ class SalesShift(_Resource):
                                     "sequence_id is required")
         out = self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/{action}",
-            op=f"salesshift.{action}_sequence", target="infinity", json_body={})
+            f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}/{action}",
+            op=f"salesshift.{action}_sequence", target="vxcloud", json_body={})
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def activate_sequence(self, sequence_id: str) -> dict[str, Any]:
@@ -5433,8 +5518,8 @@ class SalesShift(_Resource):
                                     "contact_ids is required")
         return self.client._json(
             "POST",
-            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/enroll",
-            op="salesshift.enroll_in_sequence", target="infinity",
+            f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}/enroll",
+            op="salesshift.enroll_in_sequence", target="vxcloud",
             json_body={"contact_ids": list(contact_ids)})
 
     def sequence_enrollments(self, sequence_id: str) -> list[dict[str, Any]]:
@@ -5444,8 +5529,8 @@ class SalesShift(_Resource):
                                     "sequence_id is required")
         out = self.client._json(
             "GET",
-            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/enrollments",
-            op="salesshift.sequence_enrollments", target="infinity")
+            f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}/enrollments",
+            op="salesshift.sequence_enrollments", target="vxcloud")
         return out.get("data", []) if isinstance(out, dict) else []
 
     def sequence_analytics(self, sequence_id: str) -> dict[str, Any]:
@@ -5467,16 +5552,16 @@ class SalesShift(_Resource):
                                     "sequence_id is required")
         out = self.client._json(
             "GET",
-            f"{self.client.infinity_url}/api/v1/salesshift/sequences/{sequence_id}/analytics",
-            op="salesshift.sequence_analytics", target="infinity")
+            f"{self.client.vxcloud_url}/api/v1/salesshift/sequences/{sequence_id}/analytics",
+            op="salesshift.sequence_analytics", target="vxcloud")
         return out.get("data", out) if isinstance(out, dict) else {}
 
     def dispatch_sequences_now(self) -> dict[str, Any]:
         """Force this tenant's due steps to run now rather than waiting for the
         scheduler. The scheduler still owns the normal cadence."""
         return self.client._json(
-            "POST", self.client.infinity_url + "/api/v1/salesshift/sequences/dispatch-now",
-            op="salesshift.dispatch_sequences_now", target="infinity", json_body={})
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/sequences/dispatch-now",
+            op="salesshift.dispatch_sequences_now", target="vxcloud", json_body={})
 
 
 class Client:
@@ -5489,7 +5574,7 @@ class Client:
         username: str | None = None,
         access_token: str = "",
         refresh_token: str = "",
-        infinity_url: str = DEFAULT_INFINITY_URL,
+        vxcloud_url: str = DEFAULT_VXCLOUD_URL,
         node_url: str = "",
         tenant_id: str = "",
         organization: str = "",
@@ -5508,7 +5593,7 @@ class Client:
         self.organization = organization or self.username
         self.access_token = access_token
         self.refresh_token = refresh_token
-        self.infinity_url = infinity_url.rstrip("/")
+        self.vxcloud_url = vxcloud_url.rstrip("/")
         self.node_url = node_url.rstrip("/")
         self.tenant_id = tenant_id
         self.user_agent = user_agent
@@ -5555,7 +5640,7 @@ class Client:
             username=f.get("username"),
             access_token=f.get("access_token", ""),
             refresh_token=f.get("refresh_token", ""),
-            infinity_url=f.get("base_url") or DEFAULT_INFINITY_URL,
+            vxcloud_url=f.get("base_url") or DEFAULT_VXCLOUD_URL,
             node_url=f.get("node_url", ""),
             tenant_id=f.get("tenant_id", "") or f.get("organization_id", ""),
             organization=f.get("organization", "") or f.get("organization_name", ""),
@@ -5586,7 +5671,7 @@ class Client:
         """Resolve the tenant node base URL the same way the web dashboard does.
 
         Node-scoped endpoints (provisioning, sessions, services, metaldb, …)
-        live on the user's per-tenant node, not on the infinity control plane.
+        live on the user's per-tenant node, not on the vxcloud control plane.
         The web app derives that URL from the user's default node record at
         ``/api/v1/auth/nodes/`` (env.ts:resolveNodeUrl). The SDK mirrors that
         exactly so a client built with only ``api_key=`` + ``username=`` can
@@ -5599,8 +5684,8 @@ class Client:
             if self.node_url:
                 return self.node_url
         data = self._json(
-            "GET", self.infinity_url + "/api/v1/auth/nodes/",
-            op="client.ensure_node_url", target="infinity",
+            "GET", self.vxcloud_url + "/api/v1/auth/nodes/",
+            op="client.ensure_node_url", target="vxcloud",
         )
         # _json wraps a bare JSON array as {"data": [...]}; the endpoint may
         # also return {"results": [...]} or a bare object — handle all shapes.
@@ -5689,7 +5774,7 @@ class Client:
         # the key and return 403 ("not valid for this workspace") even though
         # the JWT is valid. For node-targeted requests, drop X-API-Key when a
         # Bearer token is present so JWT auth is used unambiguously. Control-
-        # plane (infinity_url) requests keep X-API-Key untouched. Mirrors the
+        # plane (vxcloud_url) requests keep X-API-Key untouched. Mirrors the
         # CLI-side fix in services/cli/cmd/auth.go NewAuthenticatedRequest.
         targets_node = bool(self.node_url) and url.startswith(self.node_url)
         if api_key and not (access_token and targets_node):
@@ -5699,7 +5784,7 @@ class Client:
     def _refresh(self) -> None:
         if not self.api_key:
             raise VxAuthError("vxsdk._refresh", "no api key configured — cannot refresh JWT")
-        url = self.infinity_url + "/api/v1/auth/developer/keys/login"
+        url = self.vxcloud_url + "/api/v1/auth/developer/keys/login"
         body = json.dumps({"api_key": self.api_key, "username": self.username}).encode("utf-8")
         # NOTE: this is the one request that does NOT go through _do(), so it
         # must set User-Agent itself. Without it urllib sends "Python-urllib/X"

@@ -3,7 +3,7 @@
 // Tenant nodes are per-customer provisioning environments — each customer
 // has at least one, and SDK calls target one specific node at a time.
 //
-// All endpoints in this module live on the Infinity control plane
+// All endpoints in this module live on the VxCloud control plane
 // (api.vxcloud.io), not on a tenant node, because the node registry is
 // a control-plane concern.
 package nodes
@@ -16,7 +16,7 @@ import (
 	"github.com/prodxcloud/vxcloud/transport"
 )
 
-// Node mirrors infinity's NodeResponse pydantic model.
+// Node mirrors vxcloud's NodeResponse pydantic model.
 type Node struct {
 	ID               int     `json:"id"`
 	UserID           int     `json:"user_id,omitempty"`
@@ -80,18 +80,18 @@ func (n Node) Label() string {
 // vxsdk.Client; callers obtain it from c.Nodes().
 type Client struct {
 	T           *transport.Transport
-	InfinityURL string
+	VxCloudURL string
 }
 
 // List returns all tenant nodes registered to the authenticated principal.
 //
-// Endpoint: GET {InfinityURL}/api/v1/auth/nodes/.
+// Endpoint: GET {VxCloudURL}/api/v1/auth/nodes/.
 //
 // Note: vxcli's `node list` command returned 401 for some tokens during
 // preview testing. The SDK's auto-refresh-on-401 handles that case
 // transparently when an API key is configured on the Client.
 func (c *Client) List(ctx context.Context) ([]Node, error) {
-	u := transport.JoinURL(c.InfinityURL, "/api/v1/auth/nodes/")
+	u := transport.JoinURL(c.VxCloudURL, "/api/v1/auth/nodes/")
 	var out []Node
 	if err := c.T.JSON(ctx, "nodes.List", "GET", u, nil, &out); err != nil {
 		return nil, err
@@ -102,9 +102,9 @@ func (c *Client) List(ctx context.Context) ([]Node, error) {
 // SetDefault marks the given node ID as the user's default. Subsequent
 // API key exchanges will resolve this node as the tenant target.
 //
-// Endpoint: POST {InfinityURL}/api/v1/auth/nodes/{id}/set-default.
+// Endpoint: POST {VxCloudURL}/api/v1/auth/nodes/{id}/set-default.
 func (c *Client) SetDefault(ctx context.Context, id int) error {
-	u := transport.JoinURL(c.InfinityURL, "/api/v1/auth/nodes/"+strconv.Itoa(id)+"/set-default")
+	u := transport.JoinURL(c.VxCloudURL, "/api/v1/auth/nodes/"+strconv.Itoa(id)+"/set-default")
 	return c.T.JSON(ctx, "nodes.SetDefault", "POST", u, struct{}{}, nil)
 }
 
@@ -145,9 +145,9 @@ type RegisterSelfHostedInput struct {
 // themselves (BYO hardware). No VM is provisioned on our side — the row
 // is created with cloud_provider=self-hosted, status=active.
 //
-// Endpoint: POST {InfinityURL}/api/v1/auth/nodes/self-hosted.
+// Endpoint: POST {VxCloudURL}/api/v1/auth/nodes/self-hosted.
 func (c *Client) RegisterSelfHosted(ctx context.Context, in RegisterSelfHostedInput) (*Node, error) {
-	u := transport.JoinURL(c.InfinityURL, "/api/v1/auth/nodes/self-hosted")
+	u := transport.JoinURL(c.VxCloudURL, "/api/v1/auth/nodes/self-hosted")
 	var out Node
 	if err := c.T.JSON(ctx, "nodes.RegisterSelfHosted", "POST", u, in, &out); err != nil {
 		return nil, err
@@ -158,9 +158,9 @@ func (c *Client) RegisterSelfHosted(ctx context.Context, in RegisterSelfHostedIn
 // Delete removes a node record. Only deletes the row — the caller is
 // responsible for terminating any underlying VM first.
 //
-// Endpoint: DELETE {InfinityURL}/api/v1/auth/nodes/{id}.
+// Endpoint: DELETE {VxCloudURL}/api/v1/auth/nodes/{id}.
 func (c *Client) Delete(ctx context.Context, id int) error {
-	u := transport.JoinURL(c.InfinityURL, "/api/v1/auth/nodes/"+strconv.Itoa(id))
+	u := transport.JoinURL(c.VxCloudURL, "/api/v1/auth/nodes/"+strconv.Itoa(id))
 	return c.T.JSON(ctx, "nodes.Delete", "DELETE", u, nil, nil)
 }
 
@@ -186,9 +186,9 @@ type UpdateInput struct {
 }
 
 // Update partial-updates an existing node record. Only fields set in `in`
-// are sent. Endpoint: PATCH {InfinityURL}/api/v1/auth/nodes/{id}.
+// are sent. Endpoint: PATCH {VxCloudURL}/api/v1/auth/nodes/{id}.
 func (c *Client) Update(ctx context.Context, id int, in UpdateInput) (*Node, error) {
-	u := transport.JoinURL(c.InfinityURL, "/api/v1/auth/nodes/"+strconv.Itoa(id))
+	u := transport.JoinURL(c.VxCloudURL, "/api/v1/auth/nodes/"+strconv.Itoa(id))
 	var out Node
 	if err := c.T.JSON(ctx, "nodes.Update", "PATCH", u, in, &out); err != nil {
 		return nil, err

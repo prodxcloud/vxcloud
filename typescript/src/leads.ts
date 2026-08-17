@@ -1,7 +1,7 @@
 /**
  * Leads — the global prospect pool, and this tenant's saved copies of it.
  *
- * Endpoints (infinity control plane, all under /api/v1/salesshift):
+ * Endpoints (vxcloud control plane, all under /api/v1/salesshift):
  *   POST /leads/search            POST /leads/facets       GET  /leads/quota
  *   POST /leads/reveal            POST /leads/save         GET  /leads/pool/{id}
  *   GET  /leads/company/{id}      GET  /leads              GET  /leads/{id}
@@ -9,7 +9,7 @@
  *   POST /leads/convert-from-pool POST /leads/erasure
  *   GET  /lead-searches           POST /lead-searches
  *
- * `Transport.absoluteURL` already routes `/api/v1/salesshift/*` to the Infinity
+ * `Transport.absoluteURL` already routes `/api/v1/salesshift/*` to the VxCloud
  * URL rather than the tenant node, so these paths stay relative like the
  * `salesshift email/*` methods do — see transport.ts.
  *

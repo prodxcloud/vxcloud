@@ -37,10 +37,10 @@ import (
 )
 
 // Version is the SDK version string. Bumped manually on tag.
-const Version = "2026.8.14"
+const Version = "2026.8.17"
 
 const (
-	defaultInfinityURL = "https://api.vxcloud.io"
+	defaultVxCloudURL = "https://api.vxcloud.io"
 	defaultTimeout     = 30 * time.Second
 )
 
@@ -65,7 +65,7 @@ type Client struct {
 // call on a resource module triggers credential exchange if needed.
 func New(_ context.Context, opts ...Option) (*Client, error) {
 	c := &config{
-		infinityURL: defaultInfinityURL,
+		vxcloudURL: defaultVxCloudURL,
 		timeout:     defaultTimeout,
 		userAgent:   "vxsdk-go/" + Version,
 	}
@@ -110,7 +110,7 @@ func New(_ context.Context, opts ...Option) (*Client, error) {
 }
 
 // refresh exchanges the stored API key for a fresh JWT pair against the
-// Infinity control plane and updates the client's auth state. Called by
+// VxCloud control plane and updates the client's auth state. Called by
 // the transport layer on 401, and exposed publicly via Authenticate().
 //
 // Returns an error if no API key is configured (in which case the original
@@ -125,7 +125,7 @@ func (c *Client) refresh(ctx context.Context) error {
 			Op: "vxsdk.refresh", Message: "no api key configured — cannot refresh JWT",
 		}}
 	}
-	resp, err := auth.Exchange(ctx, c.cfg.httpClient, c.cfg.infinityURL, apiKey, username)
+	resp, err := auth.Exchange(ctx, c.cfg.httpClient, c.cfg.vxcloudURL, apiKey, username)
 	if err != nil {
 		return &vxerrors.AuthError{Failure: &vxerrors.Failure{
 			Op: "vxsdk.refresh", Message: "exchange api key for jwt", Cause: err,
@@ -170,7 +170,7 @@ func LoadFromVxcli(ctx context.Context, opts ...Option) (*Client, error) {
 		merged = append(merged, WithJWT(f.AccessToken, f.RefreshToken))
 	}
 	if f.BaseURL != "" {
-		merged = append(merged, WithInfinityURL(f.BaseURL))
+		merged = append(merged, WithVxCloudURL(f.BaseURL))
 	}
 	if f.NodeURL != "" {
 		merged = append(merged, WithNodeURL(f.NodeURL))
@@ -199,8 +199,8 @@ func (c *Client) Whoami() auth.User {
 	return c.state.User
 }
 
-// InfinityURL returns the control-plane base URL the Client is targeting.
-func (c *Client) InfinityURL() string { return c.cfg.infinityURL }
+// VxCloudURL returns the control-plane base URL the Client is targeting.
+func (c *Client) VxCloudURL() string { return c.cfg.vxcloudURL }
 
 // NodeURL returns the per-tenant node base URL.
 func (c *Client) NodeURL() string {
@@ -221,7 +221,7 @@ func (c *Client) Sessions() *sessions.Client {
 // SalesShift returns the SalesShift email-service module — tracked sends
 // with suppression gating and the tenant-node email worker.
 func (c *Client) SalesShift() *salesshift.Client {
-	return &salesshift.Client{T: c.t, InfinityURL: c.InfinityURL(), NodeURL: c.NodeURL()}
+	return &salesshift.Client{T: c.t, VxCloudURL: c.VxCloudURL(), NodeURL: c.NodeURL()}
 }
 
 // CICD returns the CI/CD resource module.
@@ -265,10 +265,10 @@ func (c *Client) Connector() *connector.Client {
 
 // Nodes returns the tenant-node management resource module.
 //
-// Note: nodes endpoints live on the Infinity control plane (not on a
-// per-tenant node), so the InfinityURL is used.
+// Note: nodes endpoints live on the VxCloud control plane (not on a
+// per-tenant node), so the VxCloudURL is used.
 func (c *Client) Nodes() *nodes.Client {
-	return &nodes.Client{T: c.t, InfinityURL: c.cfg.infinityURL}
+	return &nodes.Client{T: c.t, VxCloudURL: c.cfg.vxcloudURL}
 }
 
 // Services returns the lifecycle plane: start/stop/restart/remove a

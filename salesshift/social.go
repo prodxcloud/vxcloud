@@ -40,7 +40,7 @@ type SocialChannel struct {
 // ListChannels returns the distribution catalogue. `available` is false when
 // the vxsocial service is unreachable — drafts still save, publishing does not.
 func (c *Client) ListChannels(ctx context.Context) (channels []SocialChannel, simulated, available bool, err error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/channels")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/channels")
 	var raw struct {
 		Channels  []SocialChannel `json:"channels"`
 		Simulated bool            `json:"simulated"`
@@ -92,7 +92,7 @@ type SocialPost struct {
 
 // ListPosts returns the workspace's posts, newest first, with deliveries.
 func (c *Client) ListPosts(ctx context.Context, status string) ([]SocialPost, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/posts")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/posts")
 	if status != "" {
 		url += "?status=" + status
 	}
@@ -123,7 +123,7 @@ func (c *Client) CreatePost(ctx context.Context, in NewPost) (*SocialPost, error
 	if in.Content == "" {
 		return nil, errors.New("salesshift.CreatePost: Content is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/posts")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/posts")
 	var raw struct {
 		Post SocialPost `json:"post"`
 	}
@@ -138,7 +138,7 @@ func (c *Client) DeletePost(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("salesshift.DeletePost: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/posts/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/posts/"+id)
 	if err := c.T.JSON(ctx, "salesshift.DeletePost", "DELETE", url, nil, nil); err != nil {
 		return fmt.Errorf("salesshift.DeletePost: %w", err)
 	}
@@ -163,7 +163,7 @@ func (c *Client) DistributePost(ctx context.Context, id string, concurrency int)
 	if id == "" {
 		return nil, nil, errors.New("salesshift.DistributePost: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/posts/"+id+"/distribute")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/posts/"+id+"/distribute")
 	var raw struct {
 		Post SocialPost    `json:"post"`
 		Job  DistributeJob `json:"job"`
@@ -191,7 +191,7 @@ type SocialStats struct {
 
 // GetSocialStats returns distribution totals for the workspace.
 func (c *Client) GetSocialStats(ctx context.Context) (*SocialStats, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/stats")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/stats")
 	var out SocialStats
 	if err := c.T.JSON(ctx, "salesshift.GetSocialStats", "GET", url, nil, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.GetSocialStats: %w", err)
@@ -237,7 +237,7 @@ func (c *Client) InspectURL(ctx context.Context, target string) (*InspectResult,
 	if target == "" {
 		return nil, errors.New("salesshift.InspectURL: url is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/webmaster/inspect")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/webmaster/inspect")
 	var out InspectResult
 	if err := c.T.JSON(ctx, "salesshift.InspectURL", "POST", url,
 		map[string]any{"url": target}, &out); err != nil {
@@ -265,7 +265,7 @@ type RobotsResult struct {
 
 // CheckRobots reads the site's robots.txt and says what it permits.
 func (c *Client) CheckRobots(ctx context.Context, target string) (*RobotsResult, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/webmaster/robots")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/webmaster/robots")
 	var out RobotsResult
 	if err := c.T.JSON(ctx, "salesshift.CheckRobots", "POST", url,
 		map[string]any{"url": target}, &out); err != nil {
@@ -288,7 +288,7 @@ type SitemapResult struct {
 
 // CheckSitemap fetches and summarises a sitemap (index or urlset).
 func (c *Client) CheckSitemap(ctx context.Context, target string) (*SitemapResult, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/webmaster/sitemap")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/webmaster/sitemap")
 	var out SitemapResult
 	if err := c.T.JSON(ctx, "salesshift.CheckSitemap", "POST", url,
 		map[string]any{"url": target}, &out); err != nil {
@@ -304,7 +304,7 @@ func (c *Client) GenerateWebmasterFiles(ctx context.Context, domain string, path
 	if domain == "" {
 		return "", "", 0, errors.New("salesshift.GenerateWebmasterFiles: domain is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/social/webmaster/generate")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/webmaster/generate")
 	body := map[string]any{"domain": domain, "paths": paths}
 	if len(disallow) > 0 {
 		body["disallow"] = disallow

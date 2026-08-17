@@ -88,7 +88,7 @@ func (f TaskFilter) query() string {
 // `total` is the count before the limit, so a caller can tell a truncated
 // page from a complete one.
 func (c *Client) ListTasks(ctx context.Context, f TaskFilter) (tasks []Task, assignees []TaskAssignee, total int, err error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/tasks") + f.query()
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/tasks") + f.query()
 	var raw struct {
 		Data      []Task         `json:"data"`
 		Assignees []TaskAssignee `json:"assignees"`
@@ -122,7 +122,7 @@ func (c *Client) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 	if in.Title == "" {
 		return nil, errors.New("salesshift.CreateTask: Title is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/tasks")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/tasks")
 	var out Task
 	if err := c.T.JSON(ctx, "salesshift.CreateTask", "POST", url, in, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.CreateTask: %w", err)
@@ -150,7 +150,7 @@ func (c *Client) UpdateTask(ctx context.Context, id string, patch TaskPatch) (*T
 	if id == "" {
 		return nil, errors.New("salesshift.UpdateTask: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/tasks/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/tasks/"+id)
 	var out Task
 	if err := c.T.JSON(ctx, "salesshift.UpdateTask", "PUT", url, patch, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.UpdateTask: %w", err)
@@ -164,7 +164,7 @@ func (c *Client) DeleteTask(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("salesshift.DeleteTask: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/tasks/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/tasks/"+id)
 	if err := c.T.JSON(ctx, "salesshift.DeleteTask", "DELETE", url, nil, nil); err != nil {
 		return fmt.Errorf("salesshift.DeleteTask: %w", err)
 	}
@@ -224,7 +224,7 @@ type CampaignTimelinePoint struct {
 
 // ListCampaigns returns the workspace's campaigns.
 func (c *Client) ListCampaigns(ctx context.Context) ([]Campaign, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/campaigns")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/campaigns")
 	var raw struct {
 		Data []Campaign `json:"data"`
 	}
@@ -240,7 +240,7 @@ func (c *Client) GetCampaign(ctx context.Context, id string) (*Campaign, []Campa
 	if id == "" {
 		return nil, nil, nil, errors.New("salesshift.GetCampaign: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/campaigns/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/campaigns/"+id)
 	var raw struct {
 		Data       Campaign                `json:"data"`
 		Recipients []CampaignRecipient     `json:"recipients"`
@@ -257,7 +257,7 @@ func (c *Client) SendCampaign(ctx context.Context, id, sendAt string) (*Campaign
 	if id == "" {
 		return nil, errors.New("salesshift.SendCampaign: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/campaigns/"+id+"/send")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/campaigns/"+id+"/send")
 	body := map[string]any{}
 	if sendAt != "" {
 		body["send_at"] = sendAt
@@ -286,7 +286,7 @@ type RevealQuota struct {
 
 // GetRevealQuota returns this month's reveal usage.
 func (c *Client) GetRevealQuota(ctx context.Context) (*RevealQuota, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/leads/quota")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/leads/quota")
 	var raw struct {
 		Data RevealQuota `json:"data"`
 	}

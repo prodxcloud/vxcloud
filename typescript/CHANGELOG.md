@@ -5,6 +5,23 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.17]
+
+### Changed — BREAKING: the Infinity environment variables were renamed
+
+`INFINITY_*` is **removed, not deprecated** — nothing reads it, so a stale
+config falls back to defaults silently instead of erroring.
+
+| Old (no longer read) | New |
+|---|---|
+| `INFINITY_API_URL` | `VXCLOUD_API_URL` |
+| `INFINITY_WS_URL` | `VXCLOUD_WS_URL` |
+| `NEXT_PUBLIC_INFINITY_API_URL` | `NEXT_PUBLIC_VXCLOUD_API_URL` |
+| `NEXT_PUBLIC_INFINITY_WS_URL` | `NEXT_PUBLIC_VXCLOUD_WS_URL` |
+
+Identifiers followed: `infinityURL` → `vxcloudURL`, `WithInfinityURL` →
+`WithVxCloudURL`. The node vars `VX_NODE_URL` / `NODE_URL` are unchanged.
+
 ## [2026.8.14]
 
 ### Changed — documentation

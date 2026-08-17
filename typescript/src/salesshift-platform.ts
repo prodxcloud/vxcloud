@@ -30,8 +30,23 @@ export interface PlanQuotas {
   contacts: number | null;
 }
 
+/** What a plan buys FROM US, as opposed to how much of it.
+ *
+ *  The distinction the free tier rests on: Self-Hosted is not a throttled
+ *  Starter, it is the same product running on the tenant's own node, mailboxes
+ *  and model key — which is why it is free. Its `quotas.emails` is 0, and that
+ *  does not mean "may not send": it means we are not the one sending, and
+ *  `sending === false` is what says so. Branch on these flags, never on a
+ *  quota of zero or a price of zero. */
+export interface ManagedBy {
+  compute: boolean;
+  sending: boolean;
+  ai: boolean;
+}
+
 export interface Plan {
   id: string;
+  /** self_hosted | starter | professional | organization */
   code: string;
   name: string;
   tagline: string | null;
@@ -41,7 +56,76 @@ export interface Plan {
   interval: string;
   features: string[];
   quotas: PlanQuotas;
+  isFree: boolean;
+  managed: ManagedBy;
   isPurchasable: boolean;
+  /** A free plan is activated, not bought — no card, no $0 Stripe Price.
+   *  Call `activatePlan()`, not `checkout()`. */
+  isActivatable: boolean;
+}
+
+/** The workspace's live allowance, already pooled across seats — unlike
+ *  {@link PlanQuotas}, which is the per-seat figure on the price list. */
+export interface EntitlementQuotas extends PlanQuotas {
+  users: number | null;
+}
+
+/** What the workspace may actually do, as opposed to what it pays. The server
+ *  refuses over-quota work with HTTP 402, so reading this first lets a caller
+ *  say why before it tries. */
+export interface Entitlements {
+  planCode: string;
+  planName: string;
+  status: string;
+  /** stripe | comp | manual | free */
+  source: string;
+  seats: number;
+  isFree: boolean;
+  managed: ManagedBy;
+  allowance: EntitlementQuotas;
+  selfHosted: {
+    required: boolean;
+    nodeHost: string | null;
+    verifiedAt: string | null;
+    /** `required` and a node registered. False on a self-hosted plan means
+     *  sending and agents are refused until one is. */
+    ready: boolean;
+  };
+}
+
+/** The node registration screen's whole state. */
+export interface SelfHostedStatus {
+  required: boolean;
+  host: string | null;
+  verifiedAt: string | null;
+  fingerprint: string | null;
+  /** A probe of the node just now. `null` when none is registered; a node that
+   *  is down is still the registered node, so this reports rather than throws. */
+  live: {
+    reachable: boolean;
+    version?: string | null;
+    tenantName?: string | null;
+    time?: string | null;
+    error?: string;
+  } | null;
+  install: {
+    /** The workspace UUID — always accepted, never ambiguous. */
+    tenantId: string;
+    /** Every value a node may report as its tenant id. The workspace NAME is
+     *  in here too when it is unique across all organizations, because nodes
+     *  provisioned before the handshake carry `TENANT_ID=<name>`. */
+    accepts: string[];
+    image: string;
+    healthPath: string;
+  };
+}
+
+export interface NodeRegistration {
+  host: string;
+  verified: boolean;
+  version: string | null;
+  tenantName: string | null;
+  entitlements: Entitlements;
 }
 
 export interface Subscription {
@@ -59,6 +143,9 @@ export interface Subscription {
   allowance?: PlanQuotas;
   members?: number;
   seatsShortfall?: number;
+  /** Always present, even with no subscription row — an unsubscribed workspace
+   *  is on the free tier, not in limbo. */
+  entitlements?: Entitlements;
 }
 
 export interface Invoice {
@@ -80,6 +167,12 @@ const quotas = (q: Record<string, unknown> | undefined): PlanQuotas => ({
   contacts: (q?.contacts as number) ?? null,
 });
 
+const managed = (m: Record<string, unknown> | undefined): ManagedBy => ({
+  compute: Boolean(m?.compute),
+  sending: Boolean(m?.sending),
+  ai: Boolean(m?.ai),
+});
+
 const toPlan = (p: Record<string, unknown>): Plan => ({
   id: String(p.id ?? ''),
   code: String(p.code ?? ''),
@@ -91,8 +184,32 @@ const toPlan = (p: Record<string, unknown>): Plan => ({
   interval: String(p.interval ?? 'month'),
   features: (p.features as string[]) ?? [],
   quotas: quotas(p.quotas as Record<string, unknown>),
+  isFree: Boolean(p.is_free),
+  managed: managed(p.managed as Record<string, unknown>),
   isPurchasable: Boolean(p.is_purchasable),
+  isActivatable: Boolean(p.is_activatable),
 });
+
+const toEntitlements = (e: Record<string, unknown>): Entitlements => {
+  const sh = (e.self_hosted as Record<string, unknown>) ?? {};
+  const a = (e.allowance as Record<string, unknown>) ?? {};
+  return {
+    planCode: String(e.plan_code ?? ''),
+    planName: String(e.plan_name ?? ''),
+    status: String(e.status ?? 'none'),
+    source: String(e.source ?? ''),
+    seats: Number(e.seats ?? 0),
+    isFree: Boolean(e.is_free),
+    managed: managed(e.managed as Record<string, unknown>),
+    allowance: { ...quotas(a), users: (a.users as number) ?? null },
+    selfHosted: {
+      required: Boolean(sh.required),
+      nodeHost: (sh.node_host as string) ?? null,
+      verifiedAt: (sh.verified_at as string) ?? null,
+      ready: Boolean(sh.ready),
+    },
+  };
+};
 
 const toSubscription = (s: Record<string, unknown>): Subscription => ({
   id: s.id ? String(s.id) : undefined,
@@ -109,6 +226,9 @@ const toSubscription = (s: Record<string, unknown>): Subscription => ({
   allowance: s.allowance ? quotas(s.allowance as Record<string, unknown>) : undefined,
   members: s.members !== undefined ? Number(s.members) : undefined,
   seatsShortfall: s.seats_shortfall !== undefined ? Number(s.seats_shortfall) : undefined,
+  entitlements: s.entitlements
+    ? toEntitlements(s.entitlements as Record<string, unknown>)
+    : undefined,
 });
 
 export class SalesShiftBilling {
@@ -199,6 +319,89 @@ export class SalesShiftBilling {
       })),
       reason: (b.reason as string) ?? undefined,
     };
+  }
+
+  /** What this workspace may do, without the billing detail.
+   *
+   *  Separate from `subscription()` because the app asks this far more often
+   *  than it asks about money, and a workspace with no subscription resolves
+   *  here to the free tier — never to "no plan", which would leave the caller
+   *  to guess what still works. */
+  async entitlements(): Promise<Entitlements> {
+    const res = await this.t.get<Record<string, unknown>>('/api/v1/salesshift/billing/entitlements');
+    return toEntitlements(res.body ?? {});
+  }
+
+  /** Put the workspace on a free plan. No card, no Stripe.
+   *
+   *  Free plans only — the server refuses any code not flagged free, and
+   *  refuses to downgrade a live non-free plan whether it was bought or
+   *  granted. Give that up through `cancel()`, which tells Stripe. */
+  async activatePlan(planCode: string): Promise<Subscription> {
+    if (!planCode) throw new Error('salesshift.billing.activatePlan: planCode is required');
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      '/api/v1/salesshift/billing/activate', { plan_code: planCode });
+    return toSubscription((res.body?.subscription as Record<string, unknown>) ?? {});
+  }
+
+  /** The registered node, a live probe of it, and the identity values a node
+   *  must report to be accepted. */
+  async selfHosted(): Promise<SelfHostedStatus> {
+    const res = await this.t.get<Record<string, unknown>>('/api/v1/salesshift/billing/self-hosted');
+    const b = res.body ?? {};
+    const live = b.live as Record<string, unknown> | null | undefined;
+    const install = (b.install as Record<string, unknown>) ?? {};
+    return {
+      required: Boolean(b.required),
+      host: (b.host as string) ?? null,
+      verifiedAt: (b.verified_at as string) ?? null,
+      fingerprint: (b.fingerprint as string) ?? null,
+      live: live
+        ? {
+            reachable: Boolean(live.reachable),
+            version: (live.version as string) ?? null,
+            tenantName: (live.tenant_name as string) ?? null,
+            time: (live.time as string) ?? null,
+            error: (live.error as string) ?? undefined,
+          }
+        : null,
+      install: {
+        tenantId: String(install.tenant_id ?? ''),
+        accepts: (install.accepts as string[]) ?? [],
+        image: String(install.image ?? ''),
+        healthPath: String(install.health_path ?? '/health'),
+      },
+    };
+  }
+
+  /** Point the workspace at its own node — after the node proves whose it is.
+   *
+   *  The server does not take our word for it: it calls `GET {host}/health` and
+   *  requires the node to report a tenant id in `selfHosted().install.accepts`.
+   *  Setting that needs shell access to the machine, so a node that answers
+   *  with this workspace's id is a node this workspace controls.
+   *
+   *  HTTPS is required (http:// only for localhost). Rejections: 400 no tenant
+   *  reported or plaintext, 403 identifies as another workspace, 502
+   *  unreachable. */
+  async registerNode(host: string): Promise<NodeRegistration> {
+    if (!host) throw new Error('salesshift.billing.registerNode: host is required');
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      '/api/v1/salesshift/billing/self-hosted/node', { host });
+    const b = res.body ?? {};
+    return {
+      host: String(b.host ?? ''),
+      verified: Boolean(b.verified),
+      version: (b.version as string) ?? null,
+      tenantName: (b.tenant_name as string) ?? null,
+      entitlements: toEntitlements((b.entitlements as Record<string, unknown>) ?? {}),
+    };
+  }
+
+  /** Unregister the node. On a self-hosted plan, sending and agents stop until
+   *  another one is registered — this is not a cosmetic change. */
+  async detachNode(): Promise<void> {
+    await this.t.delete('/api/v1/salesshift/billing/self-hosted/node');
   }
 }
 

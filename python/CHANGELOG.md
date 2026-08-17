@@ -6,6 +6,22 @@ release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
 
+## [2026.8.17]
+
+### Changed — BREAKING: the Infinity environment variables were renamed
+
+`INFINITY_*` is **removed, not deprecated** — nothing reads it, so a stale
+config falls back to defaults silently instead of erroring.
+
+| Old (no longer read) | New |
+|---|---|
+| `VX_INFINITY_URL`, `INFINITY_URL` | `VXCLOUD_URL` (the pair collapses to one) |
+| `INFINITY_API_URL` | `VXCLOUD_API_URL` |
+| `INFINITY_WS_URL` | `VXCLOUD_WS_URL` |
+
+Identifiers followed: `infinity_url` → `vxcloud_url`. The node vars
+`VX_NODE_URL` / `NODE_URL` are unchanged.
+
 ## [2026.8.14]
 
 ### Changed — documentation

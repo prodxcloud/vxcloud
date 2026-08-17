@@ -17,8 +17,8 @@ import java.util.Map;
  *
  * <p>Speaks the same wire contract as the Go / Python / TypeScript / C++ SDKs:
  * <ul>
- *   <li>auth exchange &mdash; {@code POST {infinity}/api/v1/auth/developer/keys/login}</li>
- *   <li>node discovery &mdash; {@code GET  {infinity}/api/v1/auth/nodes/}</li>
+ *   <li>auth exchange &mdash; {@code POST {vxcloud}/api/v1/auth/developer/keys/login}</li>
+ *   <li>node discovery &mdash; {@code GET  {vxcloud}/api/v1/auth/nodes/}</li>
  *   <li>node ops &mdash; {@code {node}/api/v2/...} (cicd, sessions, agentcontrol, health)</li>
  * </ul>
  *
@@ -47,10 +47,10 @@ import java.util.Map;
  */
 public final class VxClient {
 
-    public static final String DEFAULT_INFINITY_URL = "https://api.vxcloud.io";
+    public static final String DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io";
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
     public static final Duration LONG_TIMEOUT = Duration.ofSeconds(600);
-    private static final String VERSION = "2026.8.14";
+    private static final String VERSION = "2026.8.17";
     /** Page cap for {@code /leads/search}; the server clamps to this too. */
     private static final int LEADS_PAGE_MAX = 100;
     /** Batch cap for {@code /leads/save} and {@code /leads/convert-from-pool}. */
@@ -66,7 +66,7 @@ public final class VxClient {
     private String username;
     private String accessToken;
     private String refreshToken;
-    private final String infinityUrl;
+    private final String vxcloudUrl;
     private String nodeUrl;
     private final String tenantId;
     private final String userAgent;
@@ -81,7 +81,7 @@ public final class VxClient {
         this.username = orEmpty(b.username);
         this.accessToken = orEmpty(b.accessToken);
         this.refreshToken = orEmpty(b.refreshToken);
-        this.infinityUrl = rstripSlash(isEmpty(b.infinityUrl) ? DEFAULT_INFINITY_URL : b.infinityUrl);
+        this.vxcloudUrl = rstripSlash(isEmpty(b.vxcloudUrl) ? DEFAULT_VXCLOUD_URL : b.vxcloudUrl);
         this.nodeUrl = rstripSlash(orEmpty(b.nodeUrl));
         this.tenantId = orEmpty(b.tenantId);
         this.userAgent = isEmpty(b.userAgent) ? "vxsdk-java/" + VERSION : b.userAgent;
@@ -102,14 +102,14 @@ public final class VxClient {
 
     public static final class Builder {
         private String apiKey, username, accessToken, refreshToken;
-        private String infinityUrl = DEFAULT_INFINITY_URL;
+        private String vxcloudUrl = DEFAULT_VXCLOUD_URL;
         private String nodeUrl, tenantId, userAgent;
 
         public Builder apiKey(String v)       { this.apiKey = v; return this; }
         public Builder username(String v)     { this.username = v; return this; }
         public Builder accessToken(String v)  { this.accessToken = v; return this; }
         public Builder refreshToken(String v) { this.refreshToken = v; return this; }
-        public Builder infinityUrl(String v)  { this.infinityUrl = v; return this; }
+        public Builder vxcloudUrl(String v)  { this.vxcloudUrl = v; return this; }
         public Builder nodeUrl(String v)      { this.nodeUrl = v; return this; }
         public Builder tenantId(String v)     { this.tenantId = v; return this; }
         public Builder userAgent(String v)    { this.userAgent = v; return this; }
@@ -128,7 +128,7 @@ public final class VxClient {
     /** Resolve + cache the tenant node base URL from /api/v1/auth/nodes/. */
     public synchronized String ensureNodeUrl() {
         if (!nodeUrl.isEmpty()) return nodeUrl;
-        HttpResponse<String> r = doRequest("GET", infinityUrl + "/api/v1/auth/nodes/",
+        HttpResponse<String> r = doRequest("GET", vxcloudUrl + "/api/v1/auth/nodes/",
                 null, new LinkedHashMap<>(), DEFAULT_TIMEOUT);
         String doc = r.body();
         int def = doc.indexOf("\"is_default_node\":true");
@@ -199,7 +199,7 @@ public final class VxClient {
 
     /**
      * Send one tracked email through the org's BYOK provider (tenant-node
-     * email worker preferred) — {@code POST {infinity}/api/v1/salesshift/email/send}.
+     * email worker preferred) — {@code POST {vxcloud}/api/v1/salesshift/email/send}.
      * Merge tags like {{first_name}} resolve against the contact record;
      * suppressed/unsubscribed recipients are rejected.
      */
@@ -212,19 +212,19 @@ public final class VxClient {
         String body = "{\"to_email\":\"" + jsonEscape(toEmail)
                 + "\",\"subject\":\"" + jsonEscape(subject)
                 + "\",\"body_html\":\"" + jsonEscape(bodyHtml) + "\"}";
-        return post(infinityUrl + "/api/v1/salesshift/email/send", body);
+        return post(vxcloudUrl + "/api/v1/salesshift/email/send", body);
     }
 
-    /** Tracked outbound emails — {@code GET {infinity}/api/v1/salesshift/emails[?status=]}. */
+    /** Tracked outbound emails — {@code GET {vxcloud}/api/v1/salesshift/emails[?status=]}. */
     public String salesshiftEmails(String status) {
-        String url = infinityUrl + "/api/v1/salesshift/emails";
+        String url = vxcloudUrl + "/api/v1/salesshift/emails";
         if (!isEmpty(status)) url += "?status=" + status;
         return get(url);
     }
 
-    /** Live dashboard stats — {@code GET {infinity}/api/v1/salesshift/stats}. */
+    /** Live dashboard stats — {@code GET {vxcloud}/api/v1/salesshift/stats}. */
     public String salesshiftStats() {
-        return get(infinityUrl + "/api/v1/salesshift/stats");
+        return get(vxcloudUrl + "/api/v1/salesshift/stats");
     }
 
     /** Tenant-node email worker health — {@code GET {node}/api/v2/salesshift/email/health}. */
@@ -237,7 +237,7 @@ public final class VxClient {
     // Implements LEADS_CLIENT_CONTRACT.md for Java: flat `leads*` naming, raw
     // JSON string returns, no typed models (this SDK ships no JSON dependency).
     //
-    // Every path below is an ABSOLUTE Infinity control-plane URL. Leads do NOT
+    // Every path below is an ABSOLUTE VxCloud control-plane URL. Leads do NOT
     // live on the tenant node — a relative path would resolve() against nodeUrl
     // and 404, which is why the salesshift email methods above build absolute
     // URLs too.
@@ -274,7 +274,7 @@ public final class VxClient {
 
     /**
      * Search the global lead pool &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/search}. Returns raw JSON.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/search}. Returns raw JSON.
      *
      * <p>Reading the response:
      * <ul>
@@ -319,7 +319,7 @@ public final class VxClient {
 
     /**
      * Counts per seniority / department / country / email_status &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/facets}.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/facets}.
      *
      * <p>Only the FILTERS of {@code query} are sent; paging and sort are
      * meaningless here. Facets are pool-wide with no tenant overlay: the number
@@ -332,7 +332,7 @@ public final class VxClient {
 
     /**
      * Reveal allowance for this period &mdash;
-     * {@code GET {infinity}/api/v1/salesshift/leads/quota}. Returns
+     * {@code GET {vxcloud}/api/v1/salesshift/leads/quota}. Returns
      * {@code {used, allowance, remaining, display}}.
      *
      * <p>Call this and show {@code remaining} BEFORE any action that reveals
@@ -345,7 +345,7 @@ public final class VxClient {
 
     /**
      * Un-mask one pool person &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/reveal}. <b>Spends one
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/reveal}. <b>Spends one
      * reveal from the metered allowance</b>, unless this org has already
      * revealed the record, in which case it is free.
      *
@@ -366,7 +366,7 @@ public final class VxClient {
 
     /**
      * Copy pool rows into this org's saved leads &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/save}. Max 200 per call.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/save}. Max 200 per call.
      *
      * <p>Free: saving does NOT reveal and does NOT spend quota. A row saved
      * while masked is stored without an address, and stays that way until it is
@@ -385,7 +385,7 @@ public final class VxClient {
 
     /**
      * Full detail for one pool person &mdash;
-     * {@code GET {infinity}/api/v1/salesshift/leads/pool/{pool_id}}.
+     * {@code GET {vxcloud}/api/v1/salesshift/leads/pool/{pool_id}}.
      *
      * <p>Masking applies here exactly as in search &mdash; a detail view is not
      * a back door around the meter. {@code existing_contact_id} is non-null when
@@ -399,7 +399,7 @@ public final class VxClient {
 
     /**
      * A pool company and its people &mdash;
-     * {@code GET {infinity}/api/v1/salesshift/leads/company/{company_id}}.
+     * {@code GET {vxcloud}/api/v1/salesshift/leads/company/{company_id}}.
      *
      * <p>The people are returned three ways: {@code people} (all),
      * {@code new_prospects} and {@code existing_contacts} (already owned by this
@@ -413,7 +413,7 @@ public final class VxClient {
 
     /**
      * This org's saved leads &mdash;
-     * {@code GET {infinity}/api/v1/salesshift/leads[?status=&limit=]}.
+     * {@code GET {vxcloud}/api/v1/salesshift/leads[?status=&limit=]}.
      *
      * <p>Each row carries {@code email_masked} and {@code has_email} alongside
      * {@code email}: a lead saved before it was revealed has {@code email: null}
@@ -437,7 +437,7 @@ public final class VxClient {
 
     /**
      * One saved lead plus the live pool row behind it &mdash;
-     * {@code GET {infinity}/api/v1/salesshift/leads/{lead_id}}.
+     * {@code GET {vxcloud}/api/v1/salesshift/leads/{lead_id}}.
      *
      * <p>{@code drift} is non-empty when the pool has moved on since the
      * snapshot was taken (title changed, company changed, address went from
@@ -452,7 +452,7 @@ public final class VxClient {
 
     /**
      * Update a saved lead's status / notes / tags / score &mdash;
-     * {@code PATCH {infinity}/api/v1/salesshift/leads/{lead_id}}. Only the
+     * {@code PATCH {vxcloud}/api/v1/salesshift/leads/{lead_id}}. Only the
      * fields set on {@code changes} are sent, so an unset field is left alone
      * rather than nulled.
      */
@@ -465,7 +465,7 @@ public final class VxClient {
 
     /**
      * Convert one saved lead into a Contact &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/{lead_id}/convert}. This is
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/{lead_id}/convert}. This is
      * the ONE-WAY GATE that makes a record mailable (contract §1.1); the lead
      * row is kept as an audit trail, never moved.
      *
@@ -486,7 +486,7 @@ public final class VxClient {
 
     /**
      * Convert many saved leads &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/bulk-convert}.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/bulk-convert}.
      *
      * <p>Spends NO quota: it never reveals. Leads with no address are returned
      * as {@code skipped_no_email} rather than converted &mdash; render
@@ -502,7 +502,7 @@ public final class VxClient {
 
     /**
      * Pool &rarr; Contact in one step: save, reveal if needed, convert &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/convert-from-pool}. Max 200
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/convert-from-pool}. Max 200
      * ids per call.
      *
      * <p><b>This is a metered bulk action.</b> With
@@ -542,7 +542,7 @@ public final class VxClient {
 
     /**
      * Right to be forgotten &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/erasure}, with
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/erasure}, with
      * {@code reason} defaulting to {@code "gdpr_erasure"}.
      *
      * <p><b>GLOBAL AND IRREVERSIBLE.</b> See
@@ -554,7 +554,7 @@ public final class VxClient {
 
     /**
      * Right to be forgotten &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/leads/erasure}.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/erasure}.
      *
      * <p><b>GLOBAL AND IRREVERSIBLE</b> (contract §1.5). This does not clean up
      * your copy of a person: it deactivates them in the pool for EVERY tenant,
@@ -597,14 +597,14 @@ public final class VxClient {
                 Map.of(), LONG_TIMEOUT);
     }
 
-    /** This org's saved searches — {@code GET {infinity}/api/v1/salesshift/lead-searches}. */
+    /** This org's saved searches — {@code GET {vxcloud}/api/v1/salesshift/lead-searches}. */
     public String leadsSavedSearches() {
         return get(salesshiftUrl("/lead-searches"));
     }
 
     /**
      * Crawls a company's own website and folds what it finds into the pool.
-     * {@code POST {infinity}/api/v1/salesshift/leads/enrich}. Returns raw JSON.
+     * {@code POST {vxcloud}/api/v1/salesshift/leads/enrich}. Returns raw JSON.
      *
      * <p>The only call on this client that WRITES to the shared pool. What it
      * refuses to do matters as much as what it does: it fills gaps and never
@@ -643,7 +643,7 @@ public final class VxClient {
 
     /**
      * Save a search &mdash;
-     * {@code POST {infinity}/api/v1/salesshift/lead-searches}.
+     * {@code POST {vxcloud}/api/v1/salesshift/lead-searches}.
      *
      * <p>Only the FILTERS of {@code query} are stored &mdash; a saved search is
      * a filter set, not a page. Cursors are never persisted: one is only
@@ -1058,7 +1058,7 @@ public final class VxClient {
         if (apiKey.isEmpty()) {
             throw new VxException("vxsdk.refresh", "no api key configured — cannot refresh JWT", 401, "");
         }
-        String url = infinityUrl + "/api/v1/auth/developer/keys/login";
+        String url = vxcloudUrl + "/api/v1/auth/developer/keys/login";
         String reqBody = "{\"api_key\":\"" + jsonEscape(apiKey) + "\",\"username\":\"" + jsonEscape(username) + "\"}";
         Map<String, String> h = new LinkedHashMap<>();
         h.put("Content-Type", "application/json");
@@ -1131,12 +1131,12 @@ public final class VxClient {
     private static String urlValue(String v) { return URLEncoder.encode(v, StandardCharsets.UTF_8); }
 
     /**
-     * Absolute Infinity control-plane URL for a SalesShift path. Leads and email
+     * Absolute VxCloud control-plane URL for a SalesShift path. Leads and email
      * live on the control plane, never on the tenant node, so these must not be
      * passed as relative paths — {@link #resolve(String)} would send them to the
      * node.
      */
-    private String salesshiftUrl(String path) { return infinityUrl + "/api/v1/salesshift" + path; }
+    private String salesshiftUrl(String path) { return vxcloudUrl + "/api/v1/salesshift" + path; }
 
     /**
      * Validate an id that will be interpolated into a URL path. Rejects the

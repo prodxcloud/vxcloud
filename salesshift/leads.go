@@ -15,11 +15,11 @@ import (
 
 // Leads — the global prospect pool, and this tenant's saved copies of it.
 //
-// Every endpoint below lives on the Infinity control plane, never the tenant
+// Every endpoint below lives on the VxCloud control plane, never the tenant
 // node: the pool is global and the masking decision ("what has this org paid
 // to see") is made there. The Go pool engine on the node is deliberately
 // tenant-blind, so a client that talked to it directly would get rows nobody
-// had paid for. c.InfinityURL is therefore absolute in every call here, the
+// had paid for. c.VxCloudURL is therefore absolute in every call here, the
 // same way the email methods resolve theirs.
 //
 // Four things about this surface that are easy to get wrong, and expensive:
@@ -73,7 +73,7 @@ const (
 )
 
 func (c *Client) leadsURL(path string) string {
-	return transport.JoinURL(c.InfinityURL, leadsPrefix+path)
+	return transport.JoinURL(c.VxCloudURL, leadsPrefix+path)
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +172,7 @@ func (in SearchLeadsInput) wire(resultType string) leadSearchRequest {
 // LeadScore wraps the fit score as an object.
 //
 // It is an object rather than an int because the two backends disagree: the Go
-// pool engine emits a flat number, the ORM fallback an object, and Infinity
+// pool engine emits a flat number, the ORM fallback an object, and VxCloud
 // normalises both to {value} before replying. Decoding into an int would work
 // against one backend and quietly render every row as zero against the other.
 type LeadScore struct {
@@ -1407,7 +1407,7 @@ func (c *Client) ListSavedSearches(ctx context.Context) ([]SavedSearch, error) {
 		Data    []SavedSearch `json:"data"`
 	}
 	if err := c.T.JSON(ctx, "salesshift.ListSavedSearches", "GET",
-		transport.JoinURL(c.InfinityURL, leadsPrefix+"/lead-searches"), nil, &raw); err != nil {
+		transport.JoinURL(c.VxCloudURL, leadsPrefix+"/lead-searches"), nil, &raw); err != nil {
 		return nil, fmt.Errorf("salesshift.ListSavedSearches: %w", err)
 	}
 	return raw.Data, nil
@@ -1433,7 +1433,7 @@ func (c *Client) SaveSearch(ctx context.Context, in SaveSearchInput) (*SavedSear
 		} `json:"data"`
 	}
 	if err := c.T.JSON(ctx, "salesshift.SaveSearch", "POST",
-		transport.JoinURL(c.InfinityURL, leadsPrefix+"/lead-searches"), in, &raw); err != nil {
+		transport.JoinURL(c.VxCloudURL, leadsPrefix+"/lead-searches"), in, &raw); err != nil {
 		return nil, fmt.Errorf("salesshift.SaveSearch: %w", err)
 	}
 	return &SavedSearch{

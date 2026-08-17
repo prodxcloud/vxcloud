@@ -1,7 +1,7 @@
 /**
  * Tenant nodes resource — list, current, set-default.
  *
- * Backed by the Infinity control plane (the URL passed as `infinityURL`),
+ * Backed by the VxCloud control plane (the URL passed as `vxcloudURL`),
  * NOT the active tenant node. Each node corresponds to one regional
  * control plane (e.g. node1.prodxcloud.com).
  */

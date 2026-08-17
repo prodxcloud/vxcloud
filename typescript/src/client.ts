@@ -54,7 +54,7 @@ import { WebScraper } from './webscraper.js';
 import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.8.14';
+export const VERSION = '2026.8.17';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */
@@ -65,8 +65,8 @@ export interface VxCloudOptions {
   accessToken?: string;
   /** Pre-existing refresh token. */
   refreshToken?: string;
-  /** Override the Infinity (control plane) URL. Default: https://api.vxcloud.io */
-  infinityURL?: string;
+  /** Override the VxCloud (control plane) URL. Default: https://api.vxcloud.io */
+  vxcloudURL?: string;
   /** Override the active tenant node URL. Defaults to whatever the control plane returned. */
   nodeURL?: string;
   /** Custom User-Agent. */
@@ -145,8 +145,8 @@ export class VxCloud {
     if (opts.apiKey) validateApiKey(opts.apiKey);
 
     this.t = new Transport({
-      infinityURL: opts.infinityURL ?? 'https://api.vxcloud.io',
-      nodeURL: opts.nodeURL ?? opts.infinityURL ?? 'https://api.vxcloud.io',
+      vxcloudURL: opts.vxcloudURL ?? 'https://api.vxcloud.io',
+      nodeURL: opts.nodeURL ?? opts.vxcloudURL ?? 'https://api.vxcloud.io',
       apiKey: opts.apiKey ?? '',
       username: opts.username ?? '',
       jwt: opts.accessToken ?? '',
@@ -216,7 +216,7 @@ export class VxCloud {
       username: f.username,
       accessToken: f.access_token,
       refreshToken: f.refresh_token,
-      infinityURL: f.base_url || opts?.infinityURL,
+      vxcloudURL: f.base_url || opts?.vxcloudURL,
       nodeURL: f.node_url || opts?.nodeURL,
       tenantId: f.tenant_id || opts?.tenantId,
       ...opts,
@@ -235,7 +235,7 @@ export class VxCloud {
    *
    * Node-scoped endpoints (`/api/v2/*` — provisioning, sessions, services, the
    * SalesShift email worker) live on the caller's per-tenant node, not on the
-   * Infinity control plane. A client constructed without an explicit `nodeURL`
+   * VxCloud control plane. A client constructed without an explicit `nodeURL`
    * defaults to the control-plane URL, so those calls 404 — which reads as
    * "the service is down" rather than "you are asking the wrong host".
    *

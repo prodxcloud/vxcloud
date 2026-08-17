@@ -2,7 +2,7 @@
 // through the tenant's BYOK providers with suppression gating, daily caps,
 // open/click tracking, and the SendGrid-style Kafka event stream.
 //
-// Endpoints (Infinity control plane — FastAPI):
+// Endpoints (VxCloud control plane — FastAPI):
 //
 //	POST /api/v1/salesshift/email/send
 //	GET  /api/v1/salesshift/emails
@@ -24,7 +24,7 @@ import (
 // Client — construct via c.SalesShift().
 type Client struct {
 	T           *transport.Transport
-	InfinityURL string
+	VxCloudURL string
 	NodeURL     string
 }
 
@@ -55,7 +55,7 @@ func (c *Client) SendEmail(ctx context.Context, in SendEmailInput) (*SendEmailRe
 	if in.ToEmail == "" || in.Subject == "" || in.BodyHTML == "" {
 		return nil, errors.New("salesshift.SendEmail: ToEmail, Subject and BodyHTML are required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/email/send")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/email/send")
 	var out SendEmailResult
 	if err := c.T.JSON(ctx, "salesshift.SendEmail", "POST", url, in, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.SendEmail: %w", err)
@@ -78,7 +78,7 @@ type TrackedEmail struct {
 // ListEmails returns tracked emails, optionally filtered by status
 // (sent, opened, clicked, replied, bounced, unsubscribed, failed).
 func (c *Client) ListEmails(ctx context.Context, status string) ([]TrackedEmail, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/emails")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/emails")
 	if status != "" {
 		url += "?status=" + status
 	}
@@ -104,7 +104,7 @@ type Stats struct {
 
 // GetStats returns the org's live dashboard stats.
 func (c *Client) GetStats(ctx context.Context) (*Stats, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/stats")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/stats")
 	var out Stats
 	if err := c.T.JSON(ctx, "salesshift.GetStats", "GET", url, nil, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.GetStats: %w", err)

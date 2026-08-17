@@ -107,7 +107,7 @@ type SourceFacet struct {
 
 // ListOpportunities returns signals from the shared pool.
 func (c *Client) ListOpportunities(ctx context.Context, f OpportunityFilter) (opps []Opportunity, sources []SourceFacet, err error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/opportunities") + f.query()
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities") + f.query()
 	var raw struct {
 		Data    []Opportunity `json:"data"`
 		Sources []SourceFacet `json:"sources"`
@@ -123,7 +123,7 @@ func (c *Client) GetOpportunity(ctx context.Context, id string) (*Opportunity, e
 	if id == "" {
 		return nil, errors.New("salesshift.GetOpportunity: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/opportunities/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities/"+id)
 	var raw struct {
 		Data Opportunity `json:"data"`
 	}
@@ -148,7 +148,7 @@ func (c *Client) patchOpportunity(ctx context.Context, op, id string, body map[s
 	if id == "" {
 		return nil, fmt.Errorf("%s: id is required", op)
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/opportunities/"+id)
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities/"+id)
 	var raw struct {
 		Data Opportunity `json:"data"`
 	}
@@ -167,7 +167,7 @@ func (c *Client) PushToLead(ctx context.Context, id string) (contactID string, c
 	if id == "" {
 		return "", false, errors.New("salesshift.PushToLead: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/opportunities/"+id+"/push-to-lead")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities/"+id+"/push-to-lead")
 	var raw struct {
 		LeadID  string `json:"lead_id"`
 		Created bool   `json:"created"`
@@ -184,7 +184,7 @@ func (c *Client) ConvertOpportunity(ctx context.Context, id string) (contactID, 
 	if id == "" {
 		return "", "", false, errors.New("salesshift.ConvertOpportunity: id is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/opportunities/"+id+"/convert")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities/"+id+"/convert")
 	var raw struct {
 		ContactID        string `json:"contact_id"`
 		DealID           string `json:"deal_id"`

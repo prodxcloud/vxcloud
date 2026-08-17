@@ -7,16 +7,21 @@ package salesshift
 // endpoints are the other direction: our three published plans, priced per
 // seat per month, charged on our Stripe account.
 //
-//	GET  /api/v1/salesshift/billing/plans
-//	GET  /api/v1/salesshift/billing/subscription
-//	GET  /api/v1/salesshift/billing/invoices
-//	GET  /api/v1/salesshift/billing/events
-//	POST /api/v1/salesshift/billing/checkout
-//	POST /api/v1/salesshift/billing/checkout/confirm
-//	POST /api/v1/salesshift/billing/portal
-//	POST /api/v1/salesshift/billing/change
-//	POST /api/v1/salesshift/billing/cancel
-//	POST /api/v1/salesshift/billing/resume
+//	GET    /api/v1/salesshift/billing/plans
+//	GET    /api/v1/salesshift/billing/subscription
+//	GET    /api/v1/salesshift/billing/entitlements
+//	GET    /api/v1/salesshift/billing/invoices
+//	GET    /api/v1/salesshift/billing/events
+//	POST   /api/v1/salesshift/billing/activate
+//	GET    /api/v1/salesshift/billing/self-hosted
+//	POST   /api/v1/salesshift/billing/self-hosted/node
+//	DELETE /api/v1/salesshift/billing/self-hosted/node
+//	POST   /api/v1/salesshift/billing/checkout
+//	POST   /api/v1/salesshift/billing/checkout/confirm
+//	POST   /api/v1/salesshift/billing/portal
+//	POST   /api/v1/salesshift/billing/change
+//	POST   /api/v1/salesshift/billing/cancel
+//	POST   /api/v1/salesshift/billing/resume
 
 import (
 	"context"
@@ -37,10 +42,24 @@ type PlanQuotas struct {
 	Contacts  *int `json:"contacts"`
 }
 
+// ManagedBy is what a plan buys FROM US, as opposed to how much of it.
+//
+// This is the distinction the free tier rests on. Self-Hosted is not a
+// throttled Starter — it is the same product running on the tenant's own node,
+// mailboxes and model key, which is exactly why it is free. Its Quotas.Emails
+// is 0, and that does NOT mean "may not send": it means we are not the one
+// sending, and Managed.Sending == false is what says so. Branch on these
+// flags, never on a quota of zero or a price of zero.
+type ManagedBy struct {
+	Compute bool `json:"compute"`
+	Sending bool `json:"sending"`
+	AI      bool `json:"ai"`
+}
+
 // Plan is one published tier.
 type Plan struct {
 	ID              string     `json:"id"`
-	Code            string     `json:"code"` // starter | professional | organization
+	Code            string     `json:"code"` // self_hosted | starter | professional | organization
 	Name            string     `json:"name"`
 	Tagline         string     `json:"tagline"`
 	UnitAmountCents int        `json:"unit_amount_cents"`
@@ -49,7 +68,12 @@ type Plan struct {
 	Interval        string     `json:"interval"`
 	Features        []string   `json:"features"`
 	Quotas          PlanQuotas `json:"quotas"`
+	IsFree          bool       `json:"is_free"`
+	Managed         ManagedBy  `json:"managed"`
 	IsPurchasable   bool       `json:"is_purchasable"`
+	// A free plan is activated, not bought: there is no card to take and no
+	// $0 Stripe Price to redirect to. Call ActivatePlan, not StartCheckout.
+	IsActivatable bool `json:"is_activatable"`
 }
 
 // Subscription is the workspace's own plan.
@@ -71,12 +95,15 @@ type Subscription struct {
 	Allowance           PlanQuotas `json:"allowance"`
 	Members             int        `json:"members"`
 	SeatsShortfall      int        `json:"seats_shortfall"`
+	// Always present, even on a workspace with no subscription row at all — an
+	// unsubscribed workspace is on the free tier, not in limbo.
+	Entitlements *Entitlements `json:"entitlements"`
 }
 
 // ListPlans returns the published tiers. `paymentsEnabled` is false when the
 // deployment has no usable Stripe key — plans still render, checkout refuses.
 func (c *Client) ListPlans(ctx context.Context) (plans []Plan, paymentsEnabled bool, err error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/plans")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/plans")
 	var raw struct {
 		Plans           []Plan `json:"plans"`
 		PaymentsEnabled bool   `json:"payments_enabled"`
@@ -89,7 +116,7 @@ func (c *Client) ListPlans(ctx context.Context) (plans []Plan, paymentsEnabled b
 
 // GetSubscription returns the workspace's current plan, seats and allowance.
 func (c *Client) GetSubscription(ctx context.Context) (*Subscription, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/subscription")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/subscription")
 	var out Subscription
 	if err := c.T.JSON(ctx, "salesshift.GetSubscription", "GET", url, nil, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.GetSubscription: %w", err)
@@ -116,7 +143,7 @@ type Invoice struct {
 // customer and therefore no invoices — that is an empty slice with `reason`
 // set, not an error.
 func (c *Client) ListInvoices(ctx context.Context) (invoices []Invoice, reason string, err error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/invoices")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/invoices")
 	var raw struct {
 		Invoices []Invoice `json:"invoices"`
 		Reason   string    `json:"reason"`
@@ -138,7 +165,7 @@ type BillingEvent struct {
 
 // ListBillingEvents returns the workspace's billing history.
 func (c *Client) ListBillingEvents(ctx context.Context, limit int) ([]BillingEvent, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/events")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/events")
 	if limit > 0 {
 		url += fmt.Sprintf("?limit=%d", limit)
 	}
@@ -160,7 +187,7 @@ func (c *Client) StartCheckout(ctx context.Context, planCode string, seats int) 
 	if seats <= 0 {
 		seats = 1
 	}
-	endpoint := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/checkout")
+	endpoint := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/checkout")
 	body := map[string]any{"plan_code": planCode, "seats": seats}
 	var raw struct {
 		URL       string `json:"url"`
@@ -179,7 +206,7 @@ func (c *Client) ConfirmCheckout(ctx context.Context, sessionID string) (*Subscr
 	if sessionID == "" {
 		return nil, false, errors.New("salesshift.ConfirmCheckout: sessionID is required")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/checkout/confirm")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/checkout/confirm")
 	var raw struct {
 		Applied      bool          `json:"applied"`
 		Reason       string        `json:"reason"`
@@ -195,7 +222,7 @@ func (c *Client) ConfirmCheckout(ctx context.Context, sessionID string) (*Subscr
 // BillingPortal returns a Stripe hosted portal URL for card and cancellation
 // management. Fails on a workspace with no payment account (e.g. a comp).
 func (c *Client) BillingPortal(ctx context.Context) (string, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/portal")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/portal")
 	var raw struct {
 		URL string `json:"url"`
 	}
@@ -218,7 +245,7 @@ func (c *Client) ChangeSubscription(ctx context.Context, planCode string, seats 
 	if len(body) == 0 {
 		return nil, errors.New("salesshift.ChangeSubscription: nothing to change")
 	}
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/change")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/change")
 	var raw struct {
 		Subscription Subscription `json:"subscription"`
 	}
@@ -231,7 +258,7 @@ func (c *Client) ChangeSubscription(ctx context.Context, planCode string, seats 
 // CancelSubscription ends the plan. atPeriodEnd=true keeps access until the
 // period closes, which is almost always what a customer means by "cancel".
 func (c *Client) CancelSubscription(ctx context.Context, atPeriodEnd bool) (*Subscription, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/cancel")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/cancel")
 	var raw struct {
 		Subscription Subscription `json:"subscription"`
 	}
@@ -244,7 +271,7 @@ func (c *Client) CancelSubscription(ctx context.Context, atPeriodEnd bool) (*Sub
 
 // ResumeSubscription clears a pending cancellation.
 func (c *Client) ResumeSubscription(ctx context.Context) (*Subscription, error) {
-	url := transport.JoinURL(c.InfinityURL, "/api/v1/salesshift/billing/resume")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/resume")
 	var raw struct {
 		Subscription Subscription `json:"subscription"`
 	}
@@ -252,4 +279,170 @@ func (c *Client) ResumeSubscription(ctx context.Context) (*Subscription, error) 
 		return nil, fmt.Errorf("salesshift.ResumeSubscription: %w", err)
 	}
 	return &raw.Subscription, nil
+}
+
+// ── Entitlements ─────────────────────────────────────────────────────────
+//
+// What the workspace may actually do, as opposed to what it pays. The server
+// refuses over-quota work with HTTP 402 Payment Required, so a caller that
+// reads this first can say why before it tries.
+
+// EntitlementQuotas is the workspace's live allowance, already pooled across
+// seats — unlike PlanQuotas, which is the per-seat figure on the price list.
+// A nil pointer is unlimited.
+type EntitlementQuotas struct {
+	Emails    *int `json:"emails"`
+	Reveals   *int `json:"reveals"`
+	AI        *int `json:"ai"`
+	Mailboxes *int `json:"mailboxes"`
+	Contacts  *int `json:"contacts"`
+	Users     *int `json:"users"`
+}
+
+// SelfHostedState is the node half of the entitlement: whether this plan
+// requires the tenant to run their own node, and whether they have.
+type SelfHostedState struct {
+	Required   bool   `json:"required"`
+	NodeHost   string `json:"node_host"`
+	VerifiedAt string `json:"verified_at"`
+	// Ready is Required && a node is registered. False on a self-hosted plan
+	// means sending and agents are refused until one is.
+	Ready bool `json:"ready"`
+}
+
+// Entitlements is the answer to "what can this workspace do right now".
+type Entitlements struct {
+	PlanCode   string            `json:"plan_code"`
+	PlanName   string            `json:"plan_name"`
+	Status     string            `json:"status"`
+	Source     string            `json:"source"` // stripe | comp | manual | free
+	Seats      int               `json:"seats"`
+	IsFree     bool              `json:"is_free"`
+	Managed    ManagedBy         `json:"managed"`
+	Allowance  EntitlementQuotas `json:"allowance"`
+	SelfHosted SelfHostedState   `json:"self_hosted"`
+}
+
+// GetEntitlements returns what the workspace may do, without the billing
+// detail. A workspace with no subscription is not an error and not an empty
+// answer — it resolves to the free tier, deliberately, so this never reports
+// "no plan" and leaves the caller to guess what works.
+func (c *Client) GetEntitlements(ctx context.Context) (*Entitlements, error) {
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/entitlements")
+	var out Entitlements
+	if err := c.T.JSON(ctx, "salesshift.GetEntitlements", "GET", url, nil, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.GetEntitlements: %w", err)
+	}
+	return &out, nil
+}
+
+// ActivatePlan puts the workspace on a free plan. No card, no Stripe.
+//
+// Free plans only — the server refuses any code not flagged free, so this
+// cannot become a way to grant a paid tier. It also refuses to downgrade any
+// live non-free plan, bought or granted: give that up through
+// CancelSubscription, which tells Stripe when there is a Stripe to tell.
+func (c *Client) ActivatePlan(ctx context.Context, planCode string) (*Subscription, error) {
+	if planCode == "" {
+		return nil, errors.New("salesshift.ActivatePlan: planCode is required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/activate")
+	var raw struct {
+		Subscription Subscription `json:"subscription"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.ActivatePlan", "POST", url,
+		map[string]any{"plan_code": planCode}, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.ActivatePlan: %w", err)
+	}
+	return &raw.Subscription, nil
+}
+
+// ── The self-hosted node ─────────────────────────────────────────────────
+
+// NodeProbe is the result of asking the registered node for its health right
+// now. A node that is down is still the registered node, so an unreachable
+// probe is reported, not raised.
+type NodeProbe struct {
+	Reachable  bool   `json:"reachable"`
+	Version    string `json:"version"`
+	TenantName string `json:"tenant_name"`
+	Time       string `json:"time"`
+	Error      string `json:"error"`
+}
+
+// NodeInstall is what the tenant needs to bring a node up and have it accepted.
+type NodeInstall struct {
+	// TenantID is the workspace UUID — always accepted, never ambiguous.
+	TenantID string `json:"tenant_id"`
+	// Accepts is every value the node may report as its tenant_id. The
+	// workspace NAME is in here too when it is unique across all
+	// organizations, because nodes provisioned before the handshake existed
+	// carry TENANT_ID=<name>, not the UUID.
+	Accepts    []string `json:"accepts"`
+	Image      string   `json:"image"`
+	HealthPath string   `json:"health_path"`
+}
+
+// SelfHosted is the node registration screen's whole state.
+type SelfHosted struct {
+	Required    bool        `json:"required"`
+	Host        string      `json:"host"`
+	VerifiedAt  string      `json:"verified_at"`
+	Fingerprint string      `json:"fingerprint"`
+	Live        *NodeProbe  `json:"live"` // nil when no node is registered
+	Install     NodeInstall `json:"install"`
+}
+
+// GetSelfHosted returns the registered node, a live probe of it, and the
+// identity values a node must report to be accepted.
+func (c *Client) GetSelfHosted(ctx context.Context) (*SelfHosted, error) {
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/self-hosted")
+	var out SelfHosted
+	if err := c.T.JSON(ctx, "salesshift.GetSelfHosted", "GET", url, nil, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.GetSelfHosted: %w", err)
+	}
+	return &out, nil
+}
+
+// NodeRegistration is what a successful handshake reports back.
+type NodeRegistration struct {
+	Host         string        `json:"host"`
+	Verified     bool          `json:"verified"`
+	Version      string        `json:"version"`
+	TenantName   string        `json:"tenant_name"`
+	Entitlements *Entitlements `json:"entitlements"`
+}
+
+// RegisterNode points the workspace at its own node — after the node proves
+// whose it is.
+//
+// The server does not take the caller's word for it: it calls GET {host}/health
+// and requires the node to report a tenant_id in SelfHosted.Install.Accepts.
+// Setting that requires shell access to the machine, so a node that answers
+// with this workspace's id is a node this workspace controls.
+//
+// HTTPS is required; http:// is allowed only for localhost/127.0.0.1.
+// Failures are 400 (no tenant reported, or plaintext), 403 (the node
+// identifies as another workspace) and 502 (unreachable).
+func (c *Client) RegisterNode(ctx context.Context, host string) (*NodeRegistration, error) {
+	if host == "" {
+		return nil, errors.New("salesshift.RegisterNode: host is required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/self-hosted/node")
+	var out NodeRegistration
+	if err := c.T.JSON(ctx, "salesshift.RegisterNode", "POST", url,
+		map[string]any{"host": host}, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.RegisterNode: %w", err)
+	}
+	return &out, nil
+}
+
+// DetachNode unregisters the node. On a self-hosted plan, sending and agents
+// stop until another one is registered — this is not a cosmetic change.
+func (c *Client) DetachNode(ctx context.Context) error {
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/billing/self-hosted/node")
+	if err := c.T.JSON(ctx, "salesshift.DetachNode", "DELETE", url, nil, nil); err != nil {
+		return fmt.Errorf("salesshift.DetachNode: %w", err)
+	}
+	return nil
 }

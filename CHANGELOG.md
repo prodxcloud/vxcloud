@@ -5,6 +5,32 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.17]
+
+### Changed — BREAKING: the Infinity environment variables were renamed
+
+The control plane is called **VxCloud** everywhere now. The old `INFINITY_*`
+names are **removed, not deprecated** — nothing reads them, so a stale config
+falls back to defaults silently instead of erroring.
+
+| Old (no longer read) | New |
+|---|---|
+| `VX_INFINITY_URL`, `INFINITY_URL` | `VXCLOUD_URL` (the pair collapses to one) |
+| `INFINITY_API_URL` | `VXCLOUD_API_URL` |
+| `INFINITY_WS_URL` | `VXCLOUD_WS_URL` |
+| `INFINITY_SERVICE_TOKEN` | `VXCLOUD_SERVICE_TOKEN` |
+
+The node pair `VX_NODE_URL` / `NODE_URL` is unchanged. Identifiers followed:
+`InfinityURL` → `VxCloudURL`, `infinity_url` → `vxcloud_url`, and equivalents in
+the TypeScript, Python, Java and C++ SDKs.
+
+### Fixed
+
+- This module is now tagged `v2026.8.17`, **with the `v` prefix**. Go's module
+  proxy requires it, so the previously documented
+  `go get github.com/prodxcloud/vxcloud@2026.8.14` never resolved — only the
+  older `v0.1.0-preview` did.
+
 ## [2026.8.14]
 
 ### Changed — documentation
@@ -286,7 +312,7 @@ rebuilding the request layer.
 - `vxsdk.New(ctx, opts...)` and `vxsdk.LoadFromVxcli(ctx)`.
 - `transport` — single `*http.Client` per Client, retry/backoff, single-
   flight refresh on 401, multipart helpers.
-- `auth` — APIKey validation, exchange against the Infinity control plane.
+- `auth` — APIKey validation, exchange against the VxCloud control plane.
 - `errors` — typed Failure tree (`AuthError`, `ValidationError`,
   `RateLimitError`, `ServerError`, `NetworkError`, `NotFoundError`).
 - Resource modules:

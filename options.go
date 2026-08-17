@@ -13,7 +13,7 @@ type config struct {
 	username    string
 	jwt         string
 	refreshJWT  string
-	infinityURL string
+	vxcloudURL string
 	nodeURL     string
 	tenantID    string
 	httpClient  *http.Client
@@ -39,9 +39,9 @@ func WithJWT(access, refresh string) Option {
 	return func(c *config) { c.jwt = access; c.refreshJWT = refresh }
 }
 
-// WithInfinityURL overrides the control-plane base URL (default https://api.vxcloud.io).
-func WithInfinityURL(u string) Option {
-	return func(c *config) { c.infinityURL = u }
+// WithVxCloudURL overrides the control-plane base URL (default https://api.vxcloud.io).
+func WithVxCloudURL(u string) Option {
+	return func(c *config) { c.vxcloudURL = u }
 }
 
 // WithNodeURL overrides the tenant-node base URL. If unset, it is resolved

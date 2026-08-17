@@ -13,7 +13,7 @@ import { type AuthState, authHeaders, exchangeKey } from './auth.js';
 import { fromHTTP, isRetryable, VxNetworkError } from './errors.js';
 
 export interface TransportOptions {
-  infinityURL: string;
+  vxcloudURL: string;
   nodeURL: string;
   apiKey: string;
   username: string;
@@ -39,7 +39,7 @@ export interface JSONResponse<T> {
 export class Transport {
   private state: AuthState;
   private nodeURL: string;
-  private infinityURL: string;
+  private vxcloudURL: string;
   private timeoutMs: number;
   private maxRetries: number;
   private retryBaseMs: number;
@@ -56,8 +56,8 @@ export class Transport {
       jwt: opts.jwt ?? '',
       refreshToken: opts.refreshToken ?? '',
     };
-    this.nodeURL = (opts.nodeURL || opts.infinityURL).replace(/\/+$/, '');
-    this.infinityURL = opts.infinityURL.replace(/\/+$/, '');
+    this.nodeURL = (opts.nodeURL || opts.vxcloudURL).replace(/\/+$/, '');
+    this.vxcloudURL = opts.vxcloudURL.replace(/\/+$/, '');
     this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.maxRetries = opts.maxRetries ?? 2;
     this.retryBaseMs = opts.retryBaseMs ?? 250;
@@ -174,11 +174,11 @@ export class Transport {
 
   private absoluteURL(path: string): string {
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    // /api/v1/auth/* and /api/v1/salesshift/* go to the infinity
+    // /api/v1/auth/* and /api/v1/salesshift/* go to the vxcloud
     // (control-plane) URL; everything else (deploys, sessions, services,
     // the /api/v2/salesshift email worker) goes to the active tenant node.
-    if (path.startsWith('/api/v1/auth/')) return this.infinityURL + path;
-    if (path.startsWith('/api/v1/salesshift/')) return this.infinityURL + path;
+    if (path.startsWith('/api/v1/auth/')) return this.vxcloudURL + path;
+    if (path.startsWith('/api/v1/salesshift/')) return this.vxcloudURL + path;
     return this.nodeURL + path;
   }
 
@@ -271,7 +271,7 @@ export class Transport {
     this.inflightRefresh = (async () => {
       try {
         const fresh = await exchangeKey(
-          this.fetchImpl, this.infinityURL,
+          this.fetchImpl, this.vxcloudURL,
           this.state.apiKey, this.state.username, signal,
         );
         this.state.jwt = fresh.jwt;

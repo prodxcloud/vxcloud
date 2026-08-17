@@ -51,7 +51,7 @@ func (k APIKey) Environment() string {
 	return parts[1]
 }
 
-// Token is a JWT pair returned by the Infinity control plane.
+// Token is a JWT pair returned by the VxCloud control plane.
 type Token struct {
 	Access    string    `json:"access"`
 	Refresh   string    `json:"refresh"`
