@@ -66,7 +66,7 @@ Homepage      = "https://vxcloud.io"
 Documentation = "https://vxcloud.io/docs/sdks"
 Repository    = "https://github.com/prodxcloud/vxcloud"
 Issues        = "https://github.com/prodxcloud/vxcloud/issues"
-Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/python-vxcloud/CHANGELOG.md"
+Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/python-vxcloud/CHANGELOG.md"
 
 # Two stand-alone shim modules so `import vxcloud` and `import vxcloud_async`
 # both work and forward straight to vxsdk / vxsdk_async respectively.

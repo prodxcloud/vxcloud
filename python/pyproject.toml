@@ -60,7 +60,7 @@ Homepage      = "https://vxcloud.io"
 Documentation = "https://vxcloud.io/docs/sdks"
 Repository    = "https://github.com/prodxcloud/vxcloud"
 Issues        = "https://github.com/prodxcloud/vxcloud/issues"
-Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/python/CHANGELOG.md"
+Changelog     = "https://github.com/prodxcloud/vxcloud/blob/main/python/CHANGELOG.md"
 
 # We ship two stand-alone modules (vxsdk.py, vxsdk_async.py) rather than
 # a package with __init__.py — keeps the "drop a single file into your

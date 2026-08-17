@@ -13,7 +13,7 @@
  *     console.log(sess.sessionId);
  *
  * See https://vxcloud.io/docs/sdks for the full reference and
- * https://github.com/prodxcloud/vxcloud/blob/main/services/sdk/BIG_PLAN.md
+ * https://github.com/prodxcloud/vxcloud/blob/main/BIG_PLAN.md
  * for what's coming next.
  */
 

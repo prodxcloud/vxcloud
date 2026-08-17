@@ -24,11 +24,32 @@ The node pair `VX_NODE_URL` / `NODE_URL` is unchanged. Identifiers followed:
 `InfinityURL` → `VxCloudURL`, `infinity_url` → `vxcloud_url`, and equivalents in
 the TypeScript, Python, Java and C++ SDKs.
 
-### Fixed — the Go module is installable again, at `v0.2.0`
+### Fixed — the Go module is installable again, at `v0.20260817.0`
 
 ```bash
-go get github.com/prodxcloud/vxcloud@v0.2.0
+go get github.com/prodxcloud/vxcloud@latest
+go get github.com/prodxcloud/vxcloud@v0.20260817.0   # exact pin
 ```
+
+The date lives in the **minor** field as `YYYYMMDD`, so the Go tag carries the
+release number even though it cannot *be* the release number:
+
+| Release | Go tag |
+|---|---|
+| `2026.8.17` | `v0.20260817.0` |
+| `2026.12.25` | `v0.20261225.0` |
+| same-day hotfix | `v0.20260817.1` |
+
+`minor = YYYY*10000 + MM*100 + DD` is a fixed-width positional encoding, so it
+is injective and strictly increasing for every date in any year — no collisions,
+no inversions at month or year boundaries — and the patch field leaves room for
+same-day hotfixes. The year is ≥ 1000, so the leading digit is never zero and
+the semver no-leading-zeros rule is never at risk.
+
+`v0.2.0` — a plain semver tag briefly published for this same release — is
+**retracted**, not deleted. `sum.golang.org` has already recorded it
+permanently; deleting a published tag breaks anyone who pinned it instead of
+helping them.
 
 The previously documented `go get github.com/prodxcloud/vxcloud@2026.8.14`
 never resolved; `@latest` silently fell back to `v0.1.0-preview`, so Go users
@@ -46,9 +67,8 @@ must match major version ("github.com/prodxcloud/vxcloud/v2026")
 
 So CalVer cannot be a Go module version at all. `v2026.8.17` is still pushed as
 the cross-language release marker (matching the `2026.8.14` / `2026.8.13` tags),
-but the proxy ignores it and Go resolution runs off the semver line. Pre-1.0, so
-this release's breaking env-var rename rides a minor bump: `v0.1.0-preview` →
-`v0.2.0`.
+but the proxy ignores it entirely and Go resolution runs off the encoded line
+above: `v0.1.0-preview` → `v0.20260817.0`.
 
 ## [2026.8.14]
 

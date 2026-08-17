@@ -10,7 +10,7 @@ Provision infrastructure as code — VMs, databases, Kubernetes, and serverless 
 <br />
 Deploy apps, run CI/CD pipelines, and operate policy-governed AI agents and workflows straight from your code, terminal, or CI.
 <br />
-One wire contract, three first-class SDKs — no vendor lock-in, full multi-cloud portability.
+One wire contract, five first-class SDKs — no vendor lock-in, full multi-cloud portability.
 
 [![npm](https://img.shields.io/npm/v/%40vxcloud%2Fsdk?logo=npm&label=%40vxcloud%2Fsdk&color=CB3837)](https://www.npmjs.com/package/@vxcloud/sdk)
 [![PyPI](https://img.shields.io/pypi/v/vxsdk?logo=pypi&logoColor=white&label=vxsdk&color=3776AB)](https://pypi.org/project/vxsdk/)
@@ -32,7 +32,9 @@ One wire contract, three first-class SDKs — no vendor lock-in, full multi-clou
 > `vxcloud` (PyPI) is a brand alias that re-exports `vxsdk` — `import vxcloud` ≡ `import vxsdk`.
 > Source: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud) · Docs: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
 >
-> **Status: preview (v0.1.0).** API may change before v1.0.
+> **Current release: `2026.8.17`.** Go resolves it as `v0.20260817.0` — see
+> [Install](#install) for why the Go tag looks different. API may still change
+> before v1.0.
 
 ---
 
@@ -53,21 +55,35 @@ pip install "vxsdk[async]"   # + async client (httpx)
 
 **Go** (≥ 1.22)
 ```bash
-go get github.com/prodxcloud/vxcloud@v0.2.0
-# or track the tip:
 go get github.com/prodxcloud/vxcloud@latest
+# or pin the exact release:
+go get github.com/prodxcloud/vxcloud@v0.20260817.0
 ```
 
-> The Go module line is **semver** (`v0.2.0`) and does not match the CalVer
-> number the other five SDKs share (`2026.8.17`) — they are the same release.
-> Go parses a `v`-prefixed CalVer tag as major version 2026 and rejects it, so
-> `@2026.8.17` will not resolve. Use the semver tag or `@latest`.
+> **Why the Go tag reads `v0.20260817.0` and not `2026.8.17`** — they are the
+> same release. Go requires module versions to be semver, and it parses a
+> `v`-prefixed CalVer tag as a *major version*: `v2026.8.17` means major 2026,
+> which it rejects unless the module path ends in `/v2026`. So the date is
+> carried in the **minor** field instead, as `YYYYMMDD`:
+>
+> | Release | Go tag |
+> |---|---|
+> | `2026.8.17` | `v0.20260817.0` |
+> | `2026.12.25` | `v0.20261225.0` |
+> | same-day hotfix | `v0.20260817.1` |
+>
+> This sorts correctly for every date in any year — the encoding
+> `minor = YYYY*10000 + MM*100 + DD` is strictly increasing and collision-free,
+> and the patch field leaves room for same-day fixes. `@latest` always resolves
+> to the newest release.
+>
+> `@2026.8.17` and `@v2026.8.17` will **not** resolve, and `v0.2.0` is retracted.
 
 ---
 
 ## Quick start (30 seconds)
 
-All three read `~/.vxcloud/credentials.json`, so if you've logged in with
+All five read `~/.vxcloud/credentials.json`, so if you've logged in with
 [`vxcli`](https://vxcloud.io/download/cli) (`vxcli auth login -u <user> -k xc_live_…`)
 the SDK is authenticated automatically. Otherwise pass an API key explicitly.
 
@@ -160,7 +176,7 @@ System.out.println(c.agentcontrolLlmProviders());  // authenticated
 
 ## Authentication
 
-Two interchangeable credentials, identical across all three SDKs:
+Two interchangeable credentials, identical across all five SDKs:
 
 - **API key** — `xc_live_*`, `xc_dev_*`, or `xc_test_*`. The SDK exchanges it for a
   JWT on first call and auto-refreshes on 401. Generate one at
@@ -245,7 +261,7 @@ Python and TypeScript expose the same operations with idiomatic naming
 | **Errors** | Typed error hierarchy per language; categories may be added, never removed. |
 | **Retries** | Network / 5xx / rate-limit retried with exponential backoff (default 3). Others surface immediately. |
 | **Wire format** | `snake_case` JSON matching the API verbatim; idiomatic identifiers per language. |
-| **Versioning** | Tagged `v0.1.0-preview`; v1.0 will guarantee stability across minor releases. |
+| **Versioning** | CalVer `YYYY.M.D` (currently `2026.8.17`); the Go module tag encodes the same date as `v0.20260817.0`. v1.0 will guarantee stability across minor releases. |
 
 ---
 
@@ -265,7 +281,7 @@ cd typescript && npm version 0.2.0 && npm publish --access public
 cd python         && python -m build && twine upload dist/*
 cd ../python-vxcloud && python -m build && twine upload dist/*
 ```
-Keep the three versions in lock-step. npm publishing requires a 2FA-bypass
+Keep all five versions in lock-step. npm publishing requires a 2FA-bypass
 (automation/granular) token; PyPI uses an API token.
 
 ## License
