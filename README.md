@@ -53,10 +53,15 @@ pip install "vxsdk[async]"   # + async client (httpx)
 
 **Go** (≥ 1.22)
 ```bash
+go get github.com/prodxcloud/vxcloud@v0.2.0
+# or track the tip:
 go get github.com/prodxcloud/vxcloud@latest
-# pin the preview tag:
-go get github.com/prodxcloud/vxcloud@v0.1.0-preview
 ```
+
+> The Go module line is **semver** (`v0.2.0`) and does not match the CalVer
+> number the other five SDKs share (`2026.8.17`) — they are the same release.
+> Go parses a `v`-prefixed CalVer tag as major version 2026 and rejects it, so
+> `@2026.8.17` will not resolve. Use the semver tag or `@latest`.
 
 ---
 

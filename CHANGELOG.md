@@ -24,12 +24,31 @@ The node pair `VX_NODE_URL` / `NODE_URL` is unchanged. Identifiers followed:
 `InfinityURL` → `VxCloudURL`, `infinity_url` → `vxcloud_url`, and equivalents in
 the TypeScript, Python, Java and C++ SDKs.
 
-### Fixed
+### Fixed — the Go module is installable again, at `v0.2.0`
 
-- This module is now tagged `v2026.8.17`, **with the `v` prefix**. Go's module
-  proxy requires it, so the previously documented
-  `go get github.com/prodxcloud/vxcloud@2026.8.14` never resolved — only the
-  older `v0.1.0-preview` did.
+```bash
+go get github.com/prodxcloud/vxcloud@v0.2.0
+```
+
+The previously documented `go get github.com/prodxcloud/vxcloud@2026.8.14`
+never resolved; `@latest` silently fell back to `v0.1.0-preview`, so Go users
+have been building against April's API while every other SDK moved on.
+
+**The Go module line is semver and deliberately does not match the CalVer
+release number the other five SDKs share.** Adding a `v` prefix does not fix a
+CalVer tag — Go parses `v2026.8.17` as *major version 2026* and rejects it
+unless the module path ends in `/v2026`:
+
+```
+invalid version: module contains a go.mod file, so module path
+must match major version ("github.com/prodxcloud/vxcloud/v2026")
+```
+
+So CalVer cannot be a Go module version at all. `v2026.8.17` is still pushed as
+the cross-language release marker (matching the `2026.8.14` / `2026.8.13` tags),
+but the proxy ignores it and Go resolution runs off the semver line. Pre-1.0, so
+this release's breaking env-var rename rides a minor bump: `v0.1.0-preview` →
+`v0.2.0`.
 
 ## [2026.8.14]
 
