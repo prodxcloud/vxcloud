@@ -51,7 +51,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-__version__ = "2026.8.17"
+__version__ = "2026.8.26"
 
 DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io"
 DEFAULT_TIMEOUT = 30

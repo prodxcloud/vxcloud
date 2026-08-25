@@ -26,21 +26,25 @@ import (
 
 // Opportunity is one signal in the shared pool.
 type Opportunity struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
-	Category     string   `json:"category"`
-	Skills       []string `json:"skills"`
-	CompanyName  string   `json:"company_name"`
-	ContactEmail string   `json:"contact_email"`
-	Location     string   `json:"location"`
-	BudgetMin    *float64 `json:"budget_min"`
-	BudgetMax    *float64 `json:"budget_max"`
-	Currency     string   `json:"currency"`
-	Duration     string   `json:"duration"`
-	Status       string   `json:"status"`
-	PostedBy     string   `json:"posted_by"`
-	CreatedAt    string   `json:"created_at"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// DescriptionTruncated is true when the list route cut Description at its
+	// 600-character budget. Without it a cut body is indistinguishable from a
+	// whole one — re-read the row with GetOpportunity to get the rest.
+	DescriptionTruncated bool     `json:"description_truncated"`
+	Category             string   `json:"category"`
+	Skills               []string `json:"skills"`
+	CompanyName          string   `json:"company_name"`
+	ContactEmail         string   `json:"contact_email"`
+	Location             string   `json:"location"`
+	BudgetMin            *float64 `json:"budget_min"`
+	BudgetMax            *float64 `json:"budget_max"`
+	Currency             string   `json:"currency"`
+	Duration             string   `json:"duration"`
+	Status               string   `json:"status"`
+	PostedBy             string   `json:"posted_by"`
+	CreatedAt            string   `json:"created_at"`
 
 	// Intelligence fields. `Source` names the site the row was scraped from —
 	// hackernews, remoteok, remotive, manual…
@@ -69,6 +73,11 @@ type OpportunityFilter struct {
 	MinScore   int
 	SavedOnly  bool
 	Limit      int
+	// Rows to skip. Without this the page reported HasMore == true and gave the
+	// caller no way to reach the rest -- the exact inference problem HasMore
+	// exists to remove. The route declares `offset` and computes has_more as
+	// offset + len(rows) < total.
+	Offset int
 }
 
 func (f OpportunityFilter) query() string {
@@ -92,6 +101,9 @@ func (f OpportunityFilter) query() string {
 	if f.Limit > 0 {
 		v.Set("limit", strconv.Itoa(f.Limit))
 	}
+	if f.Offset > 0 {
+		v.Set("offset", strconv.Itoa(f.Offset))
+	}
 	if len(v) == 0 {
 		return ""
 	}
@@ -105,17 +117,35 @@ type SourceFacet struct {
 	Count  int    `json:"count"`
 }
 
-// ListOpportunities returns signals from the shared pool.
-func (c *Client) ListOpportunities(ctx context.Context, f OpportunityFilter) (opps []Opportunity, sources []SourceFacet, err error) {
+// OpportunityPage is the envelope that comes back beside the rows.
+//
+// Total is the POOL under the current filters, Count is this page. They are
+// different numbers — a 500-row request against 6,608 open signals returns
+// Count 500 and Total 6608 — and HasMore is stated by the server rather than
+// inferred from len(data) >= Limit, an inference that is wrong at 499 of 500
+// and leaves the caller with no way to reach the rest.
+type OpportunityPage struct {
+	Total   int  `json:"total"`
+	Count   int  `json:"count"`
+	HasMore bool `json:"has_more"`
+	Limit   int  `json:"limit"`
+
+	Sources []SourceFacet `json:"sources"`
+}
+
+// ListOpportunities returns signals from the shared pool plus the pagination
+// envelope. The envelope used to be discarded, so callers could not tell a
+// full result from a truncated one.
+func (c *Client) ListOpportunities(ctx context.Context, f OpportunityFilter) (opps []Opportunity, page OpportunityPage, err error) {
 	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/opportunities") + f.query()
 	var raw struct {
-		Data    []Opportunity `json:"data"`
-		Sources []SourceFacet `json:"sources"`
+		Data []Opportunity `json:"data"`
+		OpportunityPage
 	}
 	if err := c.T.JSON(ctx, "salesshift.ListOpportunities", "GET", url, nil, &raw); err != nil {
-		return nil, nil, fmt.Errorf("salesshift.ListOpportunities: %w", err)
+		return nil, OpportunityPage{}, fmt.Errorf("salesshift.ListOpportunities: %w", err)
 	}
-	return raw.Data, raw.Sources, nil
+	return raw.Data, raw.OpportunityPage, nil
 }
 
 // GetOpportunity reads one signal, including this org's saved/dismissed state.

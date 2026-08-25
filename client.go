@@ -37,7 +37,7 @@ import (
 )
 
 // Version is the SDK version string. Bumped manually on tag.
-const Version = "2026.8.17"
+const Version = "2026.8.26"
 
 const (
 	defaultVxCloudURL = "https://api.vxcloud.io"

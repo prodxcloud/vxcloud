@@ -343,6 +343,12 @@ export interface WorkflowRun {
   isSample: boolean;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * How many steps this run has executed. The LIST endpoint returns this count,
+   * not the step bodies — `steps` is only populated by the per-run detail route.
+   * Reading `steps` off a list response always gave `[]`; use `stepsCount` there.
+   */
+  stepsCount: number;
   steps: RunStep[];
 }
 
@@ -367,6 +373,7 @@ function toRun(r: Record<string, unknown>): WorkflowRun {
     isSample: Boolean(r.is_sample),
     startedAt: (r.started_at as string) ?? null,
     finishedAt: (r.finished_at as string) ?? null,
+    stepsCount: n(r.steps_count),
     steps: list(r.steps).map(toStep),
   };
 }
@@ -532,16 +539,20 @@ export class SalesShiftWorkflows {
       enrolled: n(b.enrolled),
       skipped: list(b.skipped).map((d) => ({
         contactId: s(d.contact_id),
-        email: s(d.email),
         reason: s(d.reason),
       })),
       runIds: Array.isArray(b.run_ids) ? b.run_ids.map(String) : [],
     };
   }
 
-  async runs(id: string): Promise<WorkflowRun[]> {
+  async runs(id: string, opts: { limit?: number } = {}): Promise<WorkflowRun[]> {
+    // The route caps at 200 (ge=1, le=200) and defaults to 50 — it does not
+    // page beyond that, so a caller wanting more than the newest 50 must ask.
+    const p = new URLSearchParams();
+    if (opts.limit != null) p.set('limit', String(opts.limit));
+    const qs = p.toString();
     const res = await this.t.get<{ data?: Record<string, unknown>[] }>(
-      `/api/v1/salesshift/workflows/${id}/runs`,
+      `/api/v1/salesshift/workflows/${id}/runs${qs ? `?${qs}` : ''}`,
     );
     return list(res.body?.data).map(toRun);
   }
@@ -594,7 +605,6 @@ export interface SequenceTotals {
  *  unsubscribed, no address) are permanent; "already enrolled" is not. */
 export interface SkipDetail {
   contactId: string;
-  email: string;
   reason: string;
 }
 
@@ -771,12 +781,16 @@ export class SalesShiftSequences {
       { contact_ids: contactIds },
     );
     const b = res.body ?? {};
+    // `skipped` is the LIST of {contact_id, reason}; reading it as a number gave
+    // 0 for every call, and `skipped_details` is a key the route has never sent,
+    // so no skip reason ever reached the caller. The route carries no `email`
+    // on these entries either.
+    const sk = list(b.skipped);
     return {
       enrolled: n(b.enrolled),
-      skipped: n(b.skipped),
-      skippedDetails: list(b.skipped_details).map((d) => ({
+      skipped: sk.length,
+      skippedDetails: sk.map((d) => ({
         contactId: s(d.contact_id),
-        email: s(d.email),
         reason: s(d.reason),
       })),
     };

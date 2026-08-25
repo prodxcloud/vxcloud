@@ -6,6 +6,26 @@ release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
 
+## [2026.8.26]
+
+First release to reach PyPI since `2026.8.14` — `2026.8.17` was tagged but
+never published, so its **BREAKING** `INFINITY_*` → `VXCLOUD_*` environment
+rename (documented below under 2026.8.17) lands here for `pip` users.
+
+### Fixed — `AsyncClient` rejected `tenant_id=` and `organization=`
+
+The sync `Client` accepts both; `AsyncClient.__init__` did not, so any code that
+constructed the two the same way died with a `TypeError` on the async path.
+`organization` falls back to `username` exactly as the sync client does.
+
+### Changed
+
+Doc and behaviour corrections carried across the SalesShift surface in this
+release — see the [root CHANGELOG](../CHANGELOG.md#2026826) for the full audit
+(enrolment decode failure, `SendCampaign` envelope, opportunity paging, the
+missing `limit` on email/post listings).
+
+
 ## [2026.8.17]
 
 ### Changed — BREAKING: the Infinity environment variables were renamed

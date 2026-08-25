@@ -5,6 +5,132 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.26]
+
+Ships the SalesShift parity audit: every method below was checked against the
+route that actually serves it, and the mismatches were real — some of them
+silent. **This is also the first release to reach the registries since
+`2026.8.14`**; `2026.8.17` was tagged but never published, so its Infinity →
+VxCloud rename lands here for npm and PyPI users.
+
+### Fixed — enrolments came back as an error even when they succeeded
+
+`SequenceEnrollResult.Skipped` was declared `int`, but the route sends a
+**list** of `{contact_id, reason}`. `encoding/json` failed with an
+`UnmarshalTypeError` on **every** call — including fully successful
+enrolments — which transport surfaces as `decode response`, so
+`EnrollInSequence` returned `(nil, err)` and the contacts it had just enrolled
+were invisible to the caller.
+
+`SkippedDetails` / `SkippedCounts` were keys the route has never emitted. They
+are replaced by the fields it does send: `Skipped []SkipDetail`, `Candidates`,
+`Cap`, `SequenceStatus`, `Dispatching`, and the flat counters
+`SkippedExisting` / `SkippedSuppressed` / `SkippedNoEmail` /
+`SkippedUnsubscribed`. `SkipDetail.Email` is gone — the route sends
+`contact_id` and `reason` only.
+
+The same bug was fixed in the TypeScript SDK (`sequences.enroll`), where
+`skipped` read as `0` for every call and no skip reason ever reached the
+caller.
+
+### Fixed — a stopped enrolment was indistinguishable from a running one
+
+`Enrollment` carried three tags for keys `_enrollment_out` has never emitted —
+`next_send_at`, plus `stopped_at` and `stop_reason` behind a `StoppedeAt`
+typo — so they decoded as `""` on every call. The struct now follows the
+route: `NextActionAt`, `LastStepAt`, `PausedAt`, `CompletedAt`, `LastError`,
+`ContactCompany`, `VariantPicks`, `CreatedAt`.
+
+New `EnrollmentFilter` (`Status`, `Q`, `ErrorOnly`, `Page`, `Limit`) exposes
+the filters the route already accepted, including the ops view for
+enrolments carrying a `last_error`.
+
+### Fixed — `TestRun` never reported a sample run
+
+`is_sample` is a **sibling** of `run`, not a field inside it. Reading it from
+the run object left `IsSample` false even on a sample run.
+
+### Fixed — `SendCampaign` returned a zero-valued struct on every send
+
+`POST /campaigns/{id}/send` replies flat: there is no `data` envelope and no
+`Campaign` in it. Unwrapping `data` into a `Campaign` produced an empty struct
+for every call — no status, no counts, no way to tell a scheduled campaign
+from one that had just mailed the entire list. It now returns
+`*SendCampaignResult` (`Status`, `SendAt`, `Sent`, `Failed`, `Suppressed`).
+
+A `send_at` in the past is refused by the server rather than falling through to
+"now" — that fallthrough used to blast the whole audience immediately.
+
+### Fixed — paging silently truncated at 50 rows
+
+`ListOpportunities` discarded the pagination envelope, so a caller could not
+tell a complete result from a truncated one. It now returns
+`(opps, OpportunityPage, err)` with the server-stated `Total`, `Count`,
+`HasMore` and `Limit` — `Total` is the pool under the current filters (6,608
+open signals), `Count` is the page. `HasMore` comes from the server instead of
+being inferred from `len(data) >= Limit`, an inference that is wrong at 499 of
+500. `OpportunityFilter.Offset` reaches the rest.
+
+`Opportunity.DescriptionTruncated` reports when the list route cut the body at
+its 600-character budget — a cut body used to be indistinguishable from a whole
+one.
+
+`ListEmails` and `ListPosts` had no `limit` parameter at all, so every caller
+silently got 50 rows with no way to ask for more. Both now take one, and the
+`status` value is escaped rather than concatenated — a status containing a
+space or `&` used to corrupt the query string. The routes declare
+`ge=1,le=200`, so a limit above 200 is **rejected with 422, not clamped**.
+
+### Fixed — the async Python client rejected `tenant_id` and `organization`
+
+`AsyncClient.__init__` did not accept the two keywords the sync `Client` takes,
+so any code that constructed the two the same way died with a `TypeError` on
+the async path.
+
+### Fixed — C++: ids went into the URL path unescaped
+
+`leadsPoolPerson`, `leadsCompany` and `leadsGet` dropped their id straight into
+the path, so a value like `abc/../../admin` could reshape the request URL. All
+id-in-path getters now percent-encode the segment.
+
+`CURLOPT_CONNECTTIMEOUT` (10s) is now set. Without it, an unreachable or
+silently dropped host made every call block for the whole request timeout — on
+a long-timeout write, effectively a hang.
+
+### Added
+
+- **TypeScript** — `billing.events(limit)` reads the workspace's own
+  append-only billing trail, which answers for comped workspaces Stripe knows
+  nothing about; `opportunities.convert(id)` creates contact + deal in one
+  idempotent call; `workflows.runs(id, {limit})`; `WorkflowRun.stepsCount`
+  (the list route returns a count, not step bodies, so reading `steps` off a
+  list response always gave `[]`); `tasks.list({assigneeId})` and
+  `opportunities.list({category})`.
+
+### Changed — BREAKING (Go)
+
+| Before | After |
+|---|---|
+| `ListEmails(ctx, status)` | `ListEmails(ctx, status, limit)` |
+| `ListPosts(ctx, status)` | `ListPosts(ctx, status, limit)` |
+| `ListOpportunities(…) (opps, []SourceFacet, err)` | `(opps, OpportunityPage, err)` — facets moved to `page.Sources` |
+| `SendCampaign(…) (*Campaign, error)` | `(*SendCampaignResult, error)` |
+| `SequenceEnrollResult.Skipped int` | `Skipped []SkipDetail` |
+
+`SendContactEmail`'s doc comment was wrong in the other direction: a refused
+send arrives as HTTP 400 `Cannot send: <reason>` and is returned as an **error**
+(reasons: `no_email`, `unsubscribed`, `suppressed`). Only a delivery *failure*
+comes back 200 with `Success` false. `SendEmailResult.ContactID` is populated
+by `POST /email/send` only; the per-contact route omits it.
+
+### Go module
+
+```bash
+go get github.com/prodxcloud/vxcloud@latest
+go get github.com/prodxcloud/vxcloud@v0.20260826.0   # exact pin
+```
+
+
 ## [2026.8.17]
 
 ### Changed — BREAKING: the Infinity environment variables were renamed

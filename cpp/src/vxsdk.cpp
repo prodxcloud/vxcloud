@@ -12,7 +12,7 @@
 
 namespace vx {
 
-static const char* kVersion = "2026.8.17";
+static const char* kVersion = "2026.8.26";
 
 // ── VxError ───────────────────────────────────────────────────────────────
 
@@ -143,6 +143,20 @@ static std::string rstrip_slash(std::string s) {
     return s;
 }
 
+// Percent-encode one URL PATH SEGMENT. An id dropped raw into the path lets a
+// value like "abc/../../admin" or "..%2f" reshape the request URL, so every
+// id-in-path getter must run through this. Uses a throwaway curl handle because
+// curl_easy_escape needs one on older libcurl.
+static std::string url_segment(const std::string& raw) {
+    CURL* h = curl_easy_init();
+    if (!h) return raw;
+    char* enc = curl_easy_escape(h, raw.c_str(), static_cast<int>(raw.size()));
+    std::string out = enc ? std::string(enc) : raw;
+    if (enc) curl_free(enc);
+    curl_easy_cleanup(h);
+    return out;
+}
+
 Client::Client(ClientOptions o) {
     if (o.api_key.empty() && o.access_token.empty())
         throw VxError("vxsdk.Client", "no credentials: set api_key or access_token", 401);
@@ -200,6 +214,10 @@ Response Client::raw_request(const std::string& method, const std::string& url,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdr);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent_.c_str());
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    // Bound the TCP connect separately: without this, an unreachable or silently
+    // dropped host makes every call block for the whole request timeout (and, on
+    // a long-timeout write, effectively hang). 10s is enough for any live host.
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
@@ -647,11 +665,11 @@ std::string Client::leadsSave(const std::vector<std::string>& pool_person_ids) {
 }
 
 std::string Client::leadsPoolPerson(const std::string& pool_id) {
-    return get(vxcloud_url_ + kSalesShift + "/leads/pool/" + pool_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/pool/" + url_segment(pool_id));
 }
 
 std::string Client::leadsCompany(const std::string& company_id) {
-    return get(vxcloud_url_ + kSalesShift + "/leads/company/" + company_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/company/" + url_segment(company_id));
 }
 
 std::string Client::leadsList(const std::string& status, int limit) {
@@ -666,7 +684,7 @@ std::string Client::leadsList(const std::string& status, int limit) {
 }
 
 std::string Client::leadsGet(const std::string& lead_id) {
-    return get(vxcloud_url_ + kSalesShift + "/leads/" + lead_id);
+    return get(vxcloud_url_ + kSalesShift + "/leads/" + url_segment(lead_id));
 }
 
 std::string Client::leadsUpdate(const std::string& lead_id, const LeadUpdate& patch) {

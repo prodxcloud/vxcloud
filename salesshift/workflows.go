@@ -255,6 +255,10 @@ func (c *Client) TestRun(ctx context.Context, id, contactID string, dryRun bool)
 		Run   WorkflowRun `json:"run"`
 		Data  WorkflowRun `json:"data"`
 		Steps []RunStep   `json:"steps"`
+		// is_sample is a SIBLING of `run`, not a field inside it — the run
+		// object the route serialises has never carried the flag, so reading
+		// it from the run left IsSample false even on a sample run.
+		IsSample bool `json:"is_sample"`
 	}
 	if err := c.T.JSON(ctx, "salesshift.TestRun", "POST", url, body, &raw); err != nil {
 		return nil, fmt.Errorf("salesshift.TestRun: %w", err)
@@ -266,6 +270,7 @@ func (c *Client) TestRun(ctx context.Context, id, contactID string, dryRun bool)
 	if len(run.Steps) == 0 {
 		run.Steps = raw.Steps
 	}
+	run.IsSample = raw.IsSample
 	return &run, nil
 }
 

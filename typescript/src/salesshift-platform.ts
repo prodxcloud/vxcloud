@@ -159,6 +159,16 @@ export interface Invoice {
   invoicePdf: string | null;
 }
 
+/** One row of the append-only billing trail. `amountCents` is null for events
+ *  that moved no money (a plan change, a cancellation). */
+export interface BillingEvent {
+  id: string;
+  kind: string;
+  summary: string;
+  amountCents: number | null;
+  createdAt: string | null;
+}
+
 const quotas = (q: Record<string, unknown> | undefined): PlanQuotas => ({
   emails: (q?.emails as number) ?? null,
   reveals: (q?.reveals as number) ?? null,
@@ -319,6 +329,22 @@ export class SalesShiftBilling {
       })),
       reason: (b.reason as string) ?? undefined,
     };
+  }
+
+  /** The workspace's own billing history, newest first — kept locally, so it
+   *  answers for comped workspaces that Stripe knows nothing about. The server
+   *  clamps `limit` to 1..100. */
+  async events(limit = 25): Promise<BillingEvent[]> {
+    const qs = limit > 0 ? `?limit=${limit}` : '';
+    const res = await this.t.get<Record<string, unknown>>(
+      `/api/v1/salesshift/billing/events${qs}`);
+    return ((res.body?.events as Record<string, unknown>[]) ?? []).map((e) => ({
+      id: String(e.id ?? ''),
+      kind: String(e.kind ?? ''),
+      summary: String(e.summary ?? ''),
+      amountCents: (e.amount_cents as number) ?? null,
+      createdAt: (e.created_at as string) ?? null,
+    }));
   }
 
   /** What this workspace may do, without the billing detail.
@@ -607,6 +633,14 @@ export interface Opportunity {
   isDismissed: boolean;
 }
 
+/** What `convert()` produced. `alreadyConverted` means these ids came from an
+ *  earlier conversion, not this call. */
+export interface OpportunityConversion {
+  contactId: string;
+  dealId: string;
+  alreadyConverted: boolean;
+}
+
 const toOpp = (o: Record<string, unknown>): Opportunity => ({
   id: String(o.id ?? ''),
   title: String(o.title ?? ''),
@@ -628,11 +662,12 @@ export class SalesShiftOpportunities {
   /** The pool is cross-tenant: these rows are shared by every workspace, and
    *  saved/dismissed is per-org state joined in, not a field on the row. */
   async list(filter: {
-    q?: string; source?: string; signalType?: string; industry?: string;
+    q?: string; category?: string; source?: string; signalType?: string; industry?: string;
     minScore?: number; savedOnly?: boolean; limit?: number;
   } = {}): Promise<{ data: Opportunity[]; sources: { source: string; count: number }[] }> {
     const p = new URLSearchParams();
     if (filter.q) p.set('q', filter.q);
+    if (filter.category) p.set('category', filter.category);
     if (filter.source) p.set('source', filter.source);
     if (filter.signalType) p.set('signal_type', filter.signalType);
     if (filter.industry) p.set('industry', filter.industry);
@@ -676,6 +711,24 @@ export class SalesShiftOpportunities {
     const b = res.body ?? {};
     return { leadId: String(b.lead_id ?? ''), created: Boolean(b.created) };
   }
+
+  /** Contact + deal in the workspace's default pipeline, in one call.
+   *
+   *  Idempotent: a second call hands back the ids the first one made with
+   *  `alreadyConverted` set, rather than minting a duplicate contract. Fails
+   *  with 400 when the workspace has no pipeline or the pipeline has no
+   *  stages — open Contracts once first. */
+  async convert(id: string): Promise<OpportunityConversion> {
+    if (!id) throw new Error('salesshift.opportunities.convert: id is required');
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `/api/v1/salesshift/opportunities/${encodeURIComponent(id)}/convert`, {});
+    const b = res.body ?? {};
+    return {
+      contactId: String(b.contact_id ?? ''),
+      dealId: String(b.deal_id ?? ''),
+      alreadyConverted: Boolean(b.already_converted),
+    };
+  }
 }
 
 /* ── tasks & campaigns ───────────────────────────────────────────────── */
@@ -713,12 +766,16 @@ const toTask = (t: Record<string, unknown>): Task => ({
 export class SalesShiftTasks {
   constructor(private t: Transport) {}
 
-  async list(filter: { status?: string; taskType?: string; priority?: string; q?: string; limit?: number } = {}):
+  async list(filter: {
+    status?: string; taskType?: string; priority?: string; assigneeId?: number;
+    q?: string; limit?: number;
+  } = {}):
     Promise<{ tasks: Task[]; assignees: { id: number; name: string; email: string }[]; total: number }> {
     const p = new URLSearchParams();
     if (filter.status) p.set('status', filter.status);
     if (filter.taskType) p.set('task_type', filter.taskType);
     if (filter.priority) p.set('priority', filter.priority);
+    if (filter.assigneeId) p.set('assignee_id', String(filter.assigneeId));
     if (filter.q) p.set('q', filter.q);
     if (filter.limit) p.set('limit', String(filter.limit));
     const qs = p.toString();

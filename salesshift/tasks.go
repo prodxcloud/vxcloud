@@ -252,8 +252,27 @@ func (c *Client) GetCampaign(ctx context.Context, id string) (*Campaign, []Campa
 	return &raw.Data, raw.Recipients, raw.Timeline, nil
 }
 
+// SendCampaignResult is what POST /campaigns/{id}/send actually returns.
+//
+// The route replies flat -- there is no `data` envelope and no Campaign object
+// in it -- so unwrapping `data` into a Campaign produced a zero-valued struct
+// for every send: no status, no counts, and no way to tell a scheduled campaign
+// from one that had just mailed the whole list. Scheduling fills SendAt;
+// sending fills Sent/Failed/Suppressed.
+type SendCampaignResult struct {
+	Success    bool   `json:"success"`
+	Status     string `json:"status"`
+	SendAt     string `json:"send_at"`
+	Sent       int    `json:"sent"`
+	Failed     int    `json:"failed"`
+	Suppressed int    `json:"suppressed"`
+}
+
 // SendCampaign sends now, or schedules when sendAt (RFC3339) is given.
-func (c *Client) SendCampaign(ctx context.Context, id, sendAt string) (*Campaign, error) {
+//
+// A sendAt in the past is refused by the server rather than treated as "now":
+// that fallthrough used to blast the entire audience immediately.
+func (c *Client) SendCampaign(ctx context.Context, id, sendAt string) (*SendCampaignResult, error) {
 	if id == "" {
 		return nil, errors.New("salesshift.SendCampaign: id is required")
 	}
@@ -262,13 +281,11 @@ func (c *Client) SendCampaign(ctx context.Context, id, sendAt string) (*Campaign
 	if sendAt != "" {
 		body["send_at"] = sendAt
 	}
-	var raw struct {
-		Data Campaign `json:"data"`
-	}
-	if err := c.T.JSON(ctx, "salesshift.SendCampaign", "POST", url, body, &raw); err != nil {
+	var out SendCampaignResult
+	if err := c.T.JSON(ctx, "salesshift.SendCampaign", "POST", url, body, &out); err != nil {
 		return nil, fmt.Errorf("salesshift.SendCampaign: %w", err)
 	}
-	return &raw.Data, nil
+	return &out, nil
 }
 
 /* ── leads quota ───────────────────────────────────────────────────────── */

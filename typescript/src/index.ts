@@ -84,11 +84,11 @@ export {
 export {
   SalesShiftBilling, SalesShiftSocial, SalesShiftOpportunities,
   SalesShiftTasks, SalesShiftCampaigns,
-  type Plan, type PlanQuotas, type Subscription, type Invoice,
+  type Plan, type PlanQuotas, type Subscription, type Invoice, type BillingEvent,
   type ManagedBy, type Entitlements, type EntitlementQuotas,
   type SelfHostedStatus, type NodeRegistration,
   type SocialChannel, type SocialDelivery, type SocialPost, type DistributeJob,
-  type Opportunity, type Task, type CampaignRecipient,
+  type Opportunity, type OpportunityConversion, type Task, type CampaignRecipient,
 } from './salesshift-platform.js';
 // SalesShift CRM — contacts (mailable), workflows and sequences.
 export {

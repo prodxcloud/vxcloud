@@ -1,6 +1,6 @@
 {
   "name": "@vxcloud/sdk",
-  "version": "2026.8.17",
+  "version": "2026.8.26",
   "description": "TypeScript SDK for the vxcloud / VxCloud platform — provision infrastructure, deploy applications, run AI agents, and drive the SalesShift GTM stack (prospect pool, CRM, campaigns, opportunity signals) from your app, terminal or CI pipeline.",
   "license": "Apache-2.0",
   "author": "vxcloud <engineering@vxcloud.io>",

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	neturl "net/url"
+	"strconv"
 
 	"github.com/prodxcloud/vxcloud/transport"
 )
@@ -242,19 +243,39 @@ func (c *Client) DuplicateSequence(ctx context.Context, id string) (*Sequence, e
 // SkipDetail explains why one contact was not enrolled. Suppressed,
 // unsubscribed, address-less and already-enrolled contacts are all skipped,
 // and the reason matters: three of those are permanent, one is not.
+//
+// The route sends contact_id and reason only -- there is no email field, so
+// one was removed here rather than left to decode as "" forever.
 type SkipDetail struct {
 	ContactID string `json:"contact_id"`
-	Email     string `json:"email"`
 	Reason    string `json:"reason"`
 }
 
 // SequenceEnrollResult reports the outcome of an enrollment.
+//
+// Skipped is a LIST, not a count. Declaring it `int` made encoding/json fail
+// with an UnmarshalTypeError on EVERY call -- including fully successful
+// enrollments -- which transport turns into "decode response", so the method
+// returned (nil, err) and the enrolled contacts were invisible to the caller.
+// workflows.go carries a comment about this exact mistake being fixed there;
+// this file was missed at the time.
 type SequenceEnrollResult struct {
-	Enrolled       int            `json:"enrolled"`
-	Skipped        int            `json:"skipped"`
-	SkippedDetails []SkipDetail   `json:"skipped_details"`
-	SkippedCounts  map[string]int `json:"skipped_counts"`
-	Capped         bool           `json:"capped"`
+	Enrolled   int          `json:"enrolled"`
+	Skipped    []SkipDetail `json:"skipped"`
+	Candidates int          `json:"candidates"`
+	Capped     bool         `json:"capped"`
+	Cap        int          `json:"cap"`
+
+	// Enrolling into a draft or paused sequence is legitimate -- you build the
+	// audience first and activate later -- so the route says which it is.
+	SequenceStatus string `json:"sequence_status"`
+	Dispatching    bool   `json:"dispatching"`
+
+	// Flat breakdown of the skip reasons, as the route actually emits them.
+	SkippedExisting     int `json:"skipped_existing"`
+	SkippedSuppressed   int `json:"skipped_suppressed"`
+	SkippedNoEmail      int `json:"skipped_no_email"`
+	SkippedUnsubscribed int `json:"skipped_unsubscribed"`
 }
 
 // EnrollInSequence enrolls contacts by id. The suppression list is a hard
@@ -276,46 +297,104 @@ func (c *Client) EnrollInSequence(ctx context.Context, id string, contactIDs []s
 }
 
 // Enrollment is one contact's position in a sequence.
+//
+// Field names follow _enrollment_out in sequences_router.py. Three tags here
+// named keys the route has never emitted -- next_send_at, stopped_at and
+// stop_reason (the last two behind a `StoppedeAt` typo) -- so those values
+// decoded as "" on every call and a stopped enrolment looked indistinguishable
+// from a running one.
 type Enrollment struct {
-	ID           string `json:"id"`
-	SequenceID   string `json:"sequence_id"`
-	ContactID    string `json:"contact_id"`
-	ContactName  string `json:"contact_name"`
-	ContactEmail string `json:"contact_email"`
-	Status       string `json:"status"` // active | paused | completed | stopped
-	CurrentStep  int    `json:"current_step"`
-	NextSendAt   string `json:"next_send_at"`
-	EnrolledAt   string `json:"enrolled_at"`
-	StoppedeAt   string `json:"stopped_at"`
-	StopReason   string `json:"stop_reason"`
+	ID             string         `json:"id"`
+	SequenceID     string         `json:"sequence_id"`
+	ContactID      string         `json:"contact_id"`
+	ContactName    string         `json:"contact_name"`
+	ContactEmail   string         `json:"contact_email"`
+	ContactCompany string         `json:"contact_company"`
+	Status         string         `json:"status"` // active | paused | completed | stopped
+	CurrentStep    int            `json:"current_step"`
+	NextActionAt   string         `json:"next_action_at"`
+	LastStepAt     string         `json:"last_step_at"`
+	PausedAt       string         `json:"paused_at"`
+	CompletedAt    string         `json:"completed_at"`
+	LastError      string         `json:"last_error"`
+	VariantPicks   map[string]any `json:"variant_picks"`
+	EnrolledAt     string         `json:"enrolled_at"`
+	CreatedAt      string         `json:"created_at"`
+}
+
+// EnrollmentFilter narrows the enrollment list. Zero values are omitted, in
+// which case the route applies its own defaults (page 1, limit 50).
+type EnrollmentFilter struct {
+	Status string // active | paused | completed | stopped
+	Q      string // matches name, email or company
+	// ErrorOnly keeps only enrollments carrying a last_error — the ops view
+	// for deferred sends and dead-lettered addresses.
+	ErrorOnly bool
+	Page      int
+	// 1..200. The route DECLARES ge=1,le=200, so FastAPI rejects anything
+	// outside that with 422 -- it does not clamp. Passing 500 is an error,
+	// not 200 rows. (opportunities.go is the one that really clamps.)
+	Limit int
+}
+
+func (f EnrollmentFilter) query() string {
+	v := neturl.Values{}
+	if f.Status != "" {
+		v.Set("status", f.Status)
+	}
+	if f.Q != "" {
+		v.Set("q", f.Q)
+	}
+	if f.ErrorOnly {
+		v.Set("error_only", "true")
+	}
+	if f.Page > 0 {
+		v.Set("page", strconv.Itoa(f.Page))
+	}
+	if f.Limit > 0 {
+		v.Set("limit", strconv.Itoa(f.Limit))
+	}
+	if len(v) == 0 {
+		return ""
+	}
+	return "?" + v.Encode()
 }
 
 // SequenceEnrollments lists who is enrolled and where they are.
-func (c *Client) SequenceEnrollments(ctx context.Context, id string) ([]Enrollment, error) {
+//
+// The route paginates at 50 rows. This used to send no query string and drop
+// the `pagination` envelope, so a 400-enrollment sequence returned exactly 50
+// rows with a nil error and no way to reach the rest — read Pagination.Total
+// and page through it.
+func (c *Client) SequenceEnrollments(ctx context.Context, id string, f EnrollmentFilter) ([]Enrollment, Pagination, error) {
 	if id == "" {
-		return nil, errors.New("salesshift.SequenceEnrollments: id is required")
+		return nil, Pagination{}, errors.New("salesshift.SequenceEnrollments: id is required")
 	}
-	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/enrollments")
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id+"/enrollments") + f.query()
 	var raw struct {
-		Data []Enrollment `json:"data"`
+		Data       []Enrollment `json:"data"`
+		Pagination Pagination   `json:"pagination"`
 	}
 	if err := c.T.JSON(ctx, "salesshift.SequenceEnrollments", "GET", url, nil, &raw); err != nil {
-		return nil, fmt.Errorf("salesshift.SequenceEnrollments: %w", err)
+		return nil, Pagination{}, fmt.Errorf("salesshift.SequenceEnrollments: %w", err)
 	}
-	return raw.Data, nil
+	return raw.Data, raw.Pagination, nil
 }
 
 // StepAnalytics is the funnel for one step.
 type StepAnalytics struct {
-	StepID     string  `json:"step_id"`
-	StepNumber int     `json:"step_number"`
-	Subject    string  `json:"subject"`
-	Sent       int     `json:"sent"`
-	Opened     int     `json:"opened"`
-	Clicked    int     `json:"clicked"`
-	Replied    int     `json:"replied"`
-	OpenRate   float64 `json:"open_rate"`
-	ReplyRate  float64 `json:"reply_rate"`
+	StepID     string `json:"step_id"`
+	StepNumber int    `json:"step_number"`
+	// The funnel labels each step with `name` (the step name, falling back to
+	// "Step N"). This was tagged `subject`, a key the analytics route has never
+	// emitted, so it decoded as "" on every step.
+	Name      string  `json:"name"`
+	Sent      int     `json:"sent"`
+	Opened    int     `json:"opened"`
+	Clicked   int     `json:"clicked"`
+	Replied   int     `json:"replied"`
+	OpenRate  float64 `json:"open_rate"`
+	ReplyRate float64 `json:"reply_rate"`
 }
 
 // FunnelTotals are the whole-sequence counters. They arrive nested under
@@ -361,10 +440,19 @@ func (c *Client) Analytics(ctx context.Context, id string) (*SequenceAnalytics, 
 }
 
 // DispatchResult reports what one forced dispatch pass did.
+//
+// The route nests these under `summary` and has never sent a `due` count, so
+// decoding them from the top level yielded a zeroed struct on every call --
+// a pass that sent fifty emails reported 0 sent, 0 failed.
 type DispatchResult struct {
-	Due    int `json:"due"`
-	Sent   int `json:"sent"`
-	Failed int `json:"failed"`
+	Processed int `json:"processed"`
+	Sent      int `json:"sent"`
+	Failed    int `json:"failed"`
+	Completed int `json:"completed"`
+	Skipped   int `json:"skipped"`
+	Tasks     int `json:"tasks"`
+	Deferred  int `json:"deferred"`
+	Stopped   int `json:"stopped"`
 }
 
 // DispatchNow forces this tenant's due steps to run immediately instead of
@@ -372,9 +460,11 @@ type DispatchResult struct {
 // resumed; the scheduler still owns the normal cadence.
 func (c *Client) DispatchNow(ctx context.Context) (*DispatchResult, error) {
 	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/dispatch-now")
-	var out DispatchResult
-	if err := c.T.JSON(ctx, "salesshift.DispatchNow", "POST", url, map[string]any{}, &out); err != nil {
+	var raw struct {
+		Summary DispatchResult `json:"summary"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.DispatchNow", "POST", url, map[string]any{}, &raw); err != nil {
 		return nil, fmt.Errorf("salesshift.DispatchNow: %w", err)
 	}
-	return &out, nil
+	return &raw.Summary, nil
 }

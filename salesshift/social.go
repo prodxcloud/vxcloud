@@ -23,6 +23,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
+	"strconv"
 
 	"github.com/prodxcloud/vxcloud/transport"
 )
@@ -91,10 +93,22 @@ type SocialPost struct {
 }
 
 // ListPosts returns the workspace's posts, newest first, with deliveries.
-func (c *Client) ListPosts(ctx context.Context, status string) ([]SocialPost, error) {
+//
+// limit 0 takes the route's default of 50 rows. The route declares
+// ge=1,le=200, so a limit above 200 is REJECTED with 422, not clamped.
+// There was no limit parameter at all, so every caller silently got 50 and had
+// no way to ask for more. The status is escaped rather than concatenated.
+func (c *Client) ListPosts(ctx context.Context, status string, limit int) ([]SocialPost, error) {
 	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/posts")
+	v := neturl.Values{}
 	if status != "" {
-		url += "?status=" + status
+		v.Set("status", status)
+	}
+	if limit > 0 {
+		v.Set("limit", strconv.Itoa(limit))
+	}
+	if len(v) > 0 {
+		url += "?" + v.Encode()
 	}
 	var raw struct {
 		Posts []SocialPost `json:"posts"`

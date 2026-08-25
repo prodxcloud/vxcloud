@@ -17,15 +17,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
+	"strconv"
 
 	"github.com/prodxcloud/vxcloud/transport"
 )
 
 // Client — construct via c.SalesShift().
 type Client struct {
-	T           *transport.Transport
+	T          *transport.Transport
 	VxCloudURL string
-	NodeURL     string
+	NodeURL    string
 }
 
 // SendEmailInput is one tracked email. Subject/body accept merge tags
@@ -44,8 +46,11 @@ type SendEmailResult struct {
 	Status     string `json:"status"` // sent | failed
 	TrackingID string `json:"tracking_id"`
 	Provider   string `json:"provider"` // node-smtp | smtp | sendgrid | mailgun | platform | sink
-	ContactID  string `json:"contact_id"`
-	Error      string `json:"error,omitempty"`
+	// ContactID is only sent by POST /email/send. The per-contact route
+	// (SendContactEmail) omits it, so it is "" there — the caller supplied
+	// the id in that case anyway.
+	ContactID string `json:"contact_id"`
+	Error     string `json:"error,omitempty"`
 }
 
 // SendEmail delivers one tracked email through the org's BYOK provider
@@ -77,10 +82,23 @@ type TrackedEmail struct {
 
 // ListEmails returns tracked emails, optionally filtered by status
 // (sent, opened, clicked, replied, bounced, unsubscribed, failed).
-func (c *Client) ListEmails(ctx context.Context, status string) ([]TrackedEmail, error) {
+//
+// limit 0 takes the route's default of 50 rows. The route declares
+// ge=1,le=200, so a limit above 200 is REJECTED with 422, not clamped.
+// There was no limit parameter at all, so every caller silently got 50 and had
+// no way to ask for more. The status is escaped rather than concatenated —
+// a value with a space or `&` in it used to corrupt the query string.
+func (c *Client) ListEmails(ctx context.Context, status string, limit int) ([]TrackedEmail, error) {
 	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/emails")
+	v := neturl.Values{}
 	if status != "" {
-		url += "?status=" + status
+		v.Set("status", status)
+	}
+	if limit > 0 {
+		v.Set("limit", strconv.Itoa(limit))
+	}
+	if len(v) > 0 {
+		url += "?" + v.Encode()
 	}
 	var raw struct {
 		Success bool           `json:"success"`

@@ -1767,6 +1767,8 @@ class AsyncClient:
                  access_token: str = "", refresh_token: str = "",
                  vxcloud_url: str = DEFAULT_VXCLOUD_URL,
                  node_url: str = "",
+                 tenant_id: str = "",
+                 organization: str = "",
                  user_agent: str = f"vxsdk-py-async/{__version__}",
                  http_client: httpx.AsyncClient | None = None):
         if not api_key and not access_token:
@@ -1781,6 +1783,11 @@ class AsyncClient:
         self.refresh_token = refresh_token
         self.vxcloud_url = vxcloud_url.rstrip("/")
         self.node_url = node_url.rstrip("/")
+        # Mirror the sync Client, which accepts both — without these the async
+        # client rejected tenant_id=/organization= with a TypeError, so any code
+        # that constructed the two the same way broke on the async path.
+        self.tenant_id = tenant_id
+        self.organization = organization or (username or "")
         self.user_agent = user_agent
 
         self._whoami = Whoami(username=username or "")

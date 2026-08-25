@@ -231,9 +231,11 @@ type ContactEmail struct {
 // SendContactEmail sends one tracked email through the full pipeline:
 // suppression gate, sending pool, open pixel and unsubscribe footer.
 //
-// A refused send is NOT an error — it comes back with Success false and a
-// reason, because "we declined to mail this person" is a normal outcome that
-// the caller should surface rather than retry.
+// A refused send arrives as an HTTP 400 `Cannot send: <reason>`, which this
+// method returns as an error — the reasons are no_email, unsubscribed and
+// suppressed. It is a normal outcome to surface, not a fault to retry: the
+// gate will refuse again. Only a delivery FAILURE comes back 200 with
+// Success false and Error set.
 func (c *Client) SendContactEmail(ctx context.Context, contactID string, in ContactEmail) (*SendEmailResult, error) {
 	if contactID == "" {
 		return nil, errors.New("salesshift.SendContactEmail: contactID is required")

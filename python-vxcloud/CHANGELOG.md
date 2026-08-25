@@ -5,6 +5,17 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.8.26
+
+- Re-pinned to `vxsdk==2026.8.26` (base + `[async]` extra).
+- **Inherited from `vxsdk`:** `AsyncClient` now accepts `tenant_id=` and
+  `organization=`, matching the sync `Client` — passing them used to raise
+  `TypeError` on the async path.
+- First `vxcloud` release on PyPI since `2026.8.14`. `2026.8.17` was tagged but
+  never published, so its **BREAKING** `INFINITY_*` → `VXCLOUD_*` environment
+  rename (see below) reaches `pip install vxcloud` users for the first time
+  here.
+
 ## 2026.8.17
 
 - Re-pinned to `vxsdk==2026.8.17` (base + `[async]` extra).

@@ -5,6 +5,43 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.26]
+
+First release to reach npm since `2026.8.14` — `2026.8.17` was tagged but never
+published, so its **BREAKING** `INFINITY_*` → `VXCLOUD_*` environment rename
+(documented below under 2026.8.17) lands here for `npm` users.
+
+### Fixed — `sequences.enroll()` reported 0 skipped and no reasons, always
+
+`skipped` is the **list** of `{contact_id, reason}`; it was read as a number, so
+it came back `0` on every call. `skipped_details` is a key the route has never
+sent, so no skip reason ever reached the caller. Both now derive from the one
+list the route does send. Those entries carry no `email` field either, so the
+one that decoded to `''` forever was removed.
+
+### Fixed — `WorkflowRun.steps` was always `[]` on a list response
+
+The list endpoint returns a **count**, not the step bodies — only the per-run
+detail route populates `steps`. New `stepsCount` carries the number; reading
+`steps` off a list response never worked.
+
+### Added
+
+- `billing.events(limit)` — the workspace's own append-only billing trail,
+  newest first. Kept locally, so it answers for comped workspaces that Stripe
+  knows nothing about. `amountCents` is `null` for events that moved no money.
+  Server clamps `limit` to 1..100.
+- `opportunities.convert(id)` — contact + deal in the workspace's default
+  pipeline in one call. Idempotent: a second call hands back the ids the first
+  one made with `alreadyConverted` set rather than minting a duplicate. Fails
+  with 400 when the workspace has no pipeline or the pipeline has no stages.
+- `workflows.runs(id, { limit })` — the route defaults to 50 and caps at 200,
+  and does not page beyond that, so more than the newest 50 must be asked for.
+- `opportunities.list({ category })` and `tasks.list({ assigneeId })` — filters
+  the routes already accepted.
+- New exported types: `BillingEvent`, `OpportunityConversion`.
+
+
 ## [2026.8.17]
 
 ### Changed — BREAKING: the Infinity environment variables were renamed
