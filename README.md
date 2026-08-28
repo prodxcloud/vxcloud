@@ -32,7 +32,7 @@ One wire contract, five first-class SDKs — no vendor lock-in, full multi-cloud
 > `vxcloud` (PyPI) is a brand alias that re-exports `vxsdk` — `import vxcloud` ≡ `import vxsdk`.
 > Source: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud) · Docs: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
 >
-> **Current release: `2026.8.27`.** Go resolves it as `v0.20260827.0` — see
+> **Current release: `2026.8.28`.** Go resolves it as `v0.20260828.0` — see
 > [Install](#install) for why the Go tag looks different. API may still change
 > before v1.0.
 
@@ -57,27 +57,27 @@ pip install "vxsdk[async]"   # + async client (httpx)
 ```bash
 go get github.com/prodxcloud/vxcloud@latest
 # or pin the exact release:
-go get github.com/prodxcloud/vxcloud@v0.20260827.0
+go get github.com/prodxcloud/vxcloud@v0.20260828.0
 ```
 
-> **Why the Go tag reads `v0.20260827.0` and not `2026.8.27`** — they are the
+> **Why the Go tag reads `v0.20260828.0` and not `2026.8.28`** — they are the
 > same release. Go requires module versions to be semver, and it parses a
-> `v`-prefixed CalVer tag as a *major version*: `v2026.8.27` means major 2026,
+> `v`-prefixed CalVer tag as a *major version*: `v2026.8.28` means major 2026,
 > which it rejects unless the module path ends in `/v2026`. So the date is
 > carried in the **minor** field instead, as `YYYYMMDD`:
 >
 > | Release | Go tag |
 > |---|---|
-> | `2026.8.27` | `v0.20260827.0` |
+> | `2026.8.28` | `v0.20260828.0` |
 > | `2026.12.25` | `v0.20261225.0` |
-> | same-day hotfix | `v0.20260827.1` |
+> | same-day hotfix | `v0.20260828.1` |
 >
 > This sorts correctly for every date in any year — the encoding
 > `minor = YYYY*10000 + MM*100 + DD` is strictly increasing and collision-free,
 > and the patch field leaves room for same-day fixes. `@latest` always resolves
 > to the newest release.
 >
-> `@2026.8.27` and `@v2026.8.27` will **not** resolve, and `v0.2.0` is retracted.
+> `@2026.8.28` and `@v2026.8.28` will **not** resolve, and `v0.2.0` is retracted.
 
 ---
 
@@ -261,7 +261,7 @@ Python and TypeScript expose the same operations with idiomatic naming
 | **Errors** | Typed error hierarchy per language; categories may be added, never removed. |
 | **Retries** | Network / 5xx / rate-limit retried with exponential backoff (default 3). Others surface immediately. |
 | **Wire format** | `snake_case` JSON matching the API verbatim; idiomatic identifiers per language. |
-| **Versioning** | CalVer `YYYY.M.D` (currently `2026.8.27`); the Go module tag encodes the same date as `v0.20260827.0`. v1.0 will guarantee stability across minor releases. |
+| **Versioning** | CalVer `YYYY.M.D` (currently `2026.8.28`); the Go module tag encodes the same date as `v0.20260828.0`. v1.0 will guarantee stability across minor releases. |
 
 ---
 

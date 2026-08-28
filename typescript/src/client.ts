@@ -54,7 +54,7 @@ import { WebScraper } from './webscraper.js';
 import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.8.27';
+export const VERSION = '2026.8.28';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */

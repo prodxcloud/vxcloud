@@ -5,16 +5,30 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.28]
+
 ### Changed — package contact address
 
-`authors` / `author` now points at `joelwembo@outlook.com` (the account that
-owns the GitHub org and both registries) instead of `engineering@vxcloud.io`,
-which was not a monitored mailbox. Affects `vxsdk`, `vxcloud` and
-`@vxcloud/sdk` metadata.
+The `Author-email` users see on PyPI and npm is now **`joelwembo@outlook.com`**,
+the account that actually owns the GitHub org and both registries.
+`engineering@vxcloud.io` was never a monitored mailbox, so anyone replying to
+the address on the package page was writing into a void.
 
-**Not yet published** — the change is staged here and ships with the next
-release. PyPI and npm versions are immutable, so `2026.8.27` keeps the old
-address permanently.
+Affects `vxsdk`, `vxcloud` and `@vxcloud/sdk`. No code changed — the clients are
+identical to `2026.8.27` apart from this metadata and the version constant.
+
+`2026.8.27` and earlier keep the old address permanently: PyPI and npm versions
+are immutable, so published metadata cannot be corrected in place, only
+superseded.
+
+### Surfaces carrying `2026.8.28`
+
+Go · `vxsdk` · `vxcloud` · `@vxcloud/sdk` · Java · C++ · `vxcli` ·
+`vxcloud/vxnode` · `vxcloud-desktop`
+
+```bash
+go get github.com/prodxcloud/vxcloud@v0.20260828.0
+```
 
 ## [2026.8.27]
 
