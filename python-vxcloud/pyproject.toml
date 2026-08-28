@@ -26,7 +26,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [
-    { name = "vxcloud", email = "engineering@vxcloud.io" },
+    { name = "vxcloud", email = "joelwembo@outlook.com" },
 ]
 keywords = [
     "vxcloud", "vxsdk", "vxcli", "infrastructure", "iac",

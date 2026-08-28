@@ -3,7 +3,7 @@
   "version": "2026.8.27",
   "description": "TypeScript SDK for the vxcloud / VxCloud platform — provision infrastructure, deploy applications, run AI agents, and drive the SalesShift GTM stack (prospect pool, CRM, campaigns, opportunity signals) from your app, terminal or CI pipeline.",
   "license": "Apache-2.0",
-  "author": "vxcloud <engineering@vxcloud.io>",
+  "author": "vxcloud <joelwembo@outlook.com>",
   "homepage": "https://vxcloud.io/docs/sdks",
   "repository": {
     "type": "git",
