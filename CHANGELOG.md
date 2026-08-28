@@ -5,6 +5,44 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.27]
+
+**Version-alignment release. No SDK code changed since `2026.8.26`** — the
+clients are byte-identical apart from the version constant. It is recorded here
+so the number is not mistaken for a behaviour change.
+
+What this release actually fixes is the *set* of things carrying the number.
+
+### Fixed — the desktop app had fallen off the shared version line
+
+`vxcloud-desktop` was still on `2026.8.17-0127` while the CLI, the node image
+and all six SDKs had moved to `2026.8.26`. The whole point of one CalVer number
+is that `vxcli version`, `pip show vxsdk` and the desktop About box agree; a
+straggler makes the number meaningless precisely when someone is trying to work
+out what they are running.
+
+It now reports `2026.8.27`, and the `-HHMM` build suffix is dropped to match the
+plain-CalVer convention the other surfaces adopted in `2026.8.17`.
+
+### Surfaces carrying `2026.8.27`
+
+| Surface | Artifact |
+|---|---|
+| Go | `github.com/prodxcloud/vxcloud@v0.20260827.0` |
+| Python | `vxsdk`, `vxcloud` (PyPI) |
+| TypeScript | `@vxcloud/sdk` (npm) |
+| Java / C++ | source (`io.vxcloud:vxsdk`, `vxsdk_cpp`) |
+| CLI | `vxcli` |
+| Node image | `vxcloud/vxnode:latest` |
+| Desktop | `vxcloud-desktop` |
+
+### Go module
+
+```bash
+go get github.com/prodxcloud/vxcloud@v0.20260827.0
+```
+
+
 ## [2026.8.26]
 
 Ships the SalesShift parity audit: every method below was checked against the

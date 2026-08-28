@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(vxsdk_cpp LANGUAGES CXX VERSION 2026.8.26)
+project(vxsdk_cpp LANGUAGES CXX VERSION 2026.8.27)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -5,6 +5,12 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.8.27
+
+- Re-pinned to `vxsdk==2026.8.27` (base + `[async]` extra). No code changes.
+- Version-alignment release: every vxcloud surface (SDKs, `vxcli`, node image,
+  desktop app) now reports the same number.
+
 ## 2026.8.26
 
 - Re-pinned to `vxsdk==2026.8.26` (base + `[async]` extra).

@@ -6,6 +6,14 @@ release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
 
+## [2026.8.27]
+
+Version-alignment release — **no code changed since `2026.8.26`**. Published so
+every vxcloud surface reports one number; the desktop app, which had lagged at
+`2026.8.17-0127`, rejoins the line here. See the
+[root CHANGELOG](../CHANGELOG.md) for the full surface table.
+
+
 ## [2026.8.26]
 
 First release to reach PyPI since `2026.8.14` — `2026.8.17` was tagged but

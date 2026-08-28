@@ -6,7 +6,7 @@
 
     <groupId>io.vxcloud</groupId>
     <artifactId>vxsdk</artifactId>
-    <version>2026.8.26</version>
+    <version>2026.8.27</version>
     <packaging>jar</packaging>
 
     <name>vxsdk-java</name>

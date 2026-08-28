@@ -5,6 +5,14 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+## [2026.8.27]
+
+Version-alignment release — **no code changed since `2026.8.26`**. Published so
+every vxcloud surface reports one number; the desktop app, which had lagged at
+`2026.8.17-0127`, rejoins the line here. See the
+[root CHANGELOG](../CHANGELOG.md) for the full surface table.
+
+
 ## [2026.8.26]
 
 First release to reach npm since `2026.8.14` — `2026.8.17` was tagged but never
