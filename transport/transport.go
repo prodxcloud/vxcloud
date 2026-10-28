@@ -208,6 +208,56 @@ func (t *Transport) JSONWithHeaders(ctx context.Context, op, method, url string,
 	return lastErr
 }
 
+// StreamJSON opens an authenticated JSON request whose response is streamed
+// (normally text/event-stream). The caller owns and must close the returned
+// body. It intentionally does not buffer or retry the stream.
+func (t *Transport) StreamJSON(ctx context.Context, op, method, url string, body any, headers map[string]string) (io.ReadCloser, error) {
+	var reader io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return nil, &vxerrors.Failure{Op: op, Message: "marshal request body", Cause: err}
+		}
+		reader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+	if err != nil {
+		return nil, &vxerrors.Failure{Op: op, Message: "build request", Cause: err}
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if t.UserAgent != "" {
+		req.Header.Set("User-Agent", t.UserAgent)
+	}
+	req.Header.Set("vx-request-id", newRequestID())
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	if t.Authorization != nil {
+		bearer, apiKey := t.Authorization()
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		targetsNode := t.NodeURL != "" && strings.HasPrefix(url, t.NodeURL)
+		if apiKey != "" && !(bearer != "" && targetsNode) {
+			req.Header.Set("X-API-Key", apiKey)
+			t.setUsername(req)
+		}
+	}
+	resp, err := t.Doer.Do(req)
+	if err != nil {
+		return nil, &vxerrors.NetworkError{Failure: &vxerrors.Failure{Op: op, Message: "transport", Cause: err}}
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return resp.Body, nil
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return nil, vxerrors.FromHTTP(op, resp.StatusCode, http.StatusText(resp.StatusCode), trim(string(bodyBytes), 800))
+}
+
 func backoff(attempt int, base time.Duration) time.Duration {
 	d := base
 	for i := 0; i < attempt; i++ {

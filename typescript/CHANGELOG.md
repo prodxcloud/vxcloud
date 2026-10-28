@@ -1,4 +1,8 @@
-# @vxcloud/sdk — Changelog
+## [2026.10.29]
+
+- Added conversation list/search/paging plus history, save, rename and delete helpers.
+- Added SSE agent and workflow chat streams with model/approval event passthrough.
+- Added explicit-confirmation workflow chat and Mission Control command helpers.# @vxcloud/sdk — Changelog
 
 All notable changes to the TypeScript SDK. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 releases may break public API in any minor bump.

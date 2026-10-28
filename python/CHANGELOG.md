@@ -1,4 +1,8 @@
-# vxsdk (Python) — Changelog
+## [2026.10.29]
+
+- Added conversation list/search/paging plus history, save, rename and delete helpers.
+- Added sync/async SSE agent and workflow chat streams with model/approval event passthrough.
+- Added explicit-confirmation workflow chat and Mission Control command helpers.# vxsdk (Python) — Changelog
 
 All notable changes to the Python SDK. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is **CalVer** (`YYYY.M.D`) to stay aligned with the vxnode fleet

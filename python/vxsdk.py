@@ -51,7 +51,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-__version__ = "2026.10.28"
+__version__ = "2026.10.29"
 
 DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io"
 DEFAULT_TIMEOUT = 30
@@ -1898,6 +1898,104 @@ class Chat(_Resource):
             messages=[{"role": "user", "content": question}],
         )
         return out.get("completion", "")
+
+    # ── shared chat history / streaming agent surface ────────────────
+
+    def list_conversations(self, *, limit: int = 50, offset: int = 0,
+                           search: str = "", agent_type: str = "",
+                           session_ids: Iterable[str] | None = None) -> dict[str, Any]:
+        """List the signed-in user's conversations with search and paging."""
+        q: dict[str, Any] = {"limit": int(limit), "offset": int(offset)}
+        if search:
+            q["q"] = search
+        if agent_type:
+            q["agent_type"] = agent_type
+        if session_ids:
+            q["session_ids"] = ",".join(str(x) for x in session_ids)
+        url = self.client.node_url + "/api/v3/ai/agent/conversations?" + urllib.parse.urlencode(q)
+        return self.client._json("GET", url, op="chat.list_conversations")
+
+    def history(self, session_id: str, *, agent_type: str = "", limit: int = 5000) -> list[dict[str, Any]]:
+        """Read one conversation in chronological order."""
+        if not session_id:
+            raise ValueError("chat.history: session_id is required")
+        q: dict[str, Any] = {"session_id": session_id, "limit": int(limit)}
+        if agent_type:
+            q["agent_type"] = agent_type
+        body = self.client._json(
+            "GET", self.client.node_url + "/api/v3/ai/agent/history?" + urllib.parse.urlencode(q),
+            op="chat.history")
+        rows = list(body.get("history") or [])
+        rows.reverse()
+        return rows
+
+    def save_message(self, *, session_id: str, message_type: str, content: str,
+                     agent_type: str = "") -> dict[str, Any]:
+        if not session_id or not content:
+            raise ValueError("chat.save_message: session_id and content are required")
+        if message_type not in ("human", "ai"):
+            raise ValueError("chat.save_message: message_type must be human or ai")
+        return self.client._json(
+            "POST", self.client.node_url + "/api/v3/ai/agent/conversation/save",
+            op="chat.save_message", json_body={"session_id": session_id,
+                                                "message_type": message_type,
+                                                "content": content,
+                                                "agent_type": agent_type})
+
+    def rename_conversation(self, session_id: str, title: str) -> dict[str, Any]:
+        if not session_id or not title.strip():
+            raise ValueError("chat.rename_conversation: session_id and title are required")
+        return self.client._json(
+            "POST", self.client.node_url + "/api/v3/ai/agent/conversation/rename",
+            op="chat.rename_conversation", json_body={"session_id": session_id, "title": title})
+
+    def delete_conversation(self, session_id: str) -> dict[str, Any]:
+        if not session_id:
+            raise ValueError("chat.delete_conversation: session_id is required")
+        return self.client._json(
+            "POST", self.client.node_url + "/api/v3/ai/agent/conversation/delete",
+            op="chat.delete_conversation", json_body={"session_id": session_id})
+
+    def stream_agent(self, *, query: str, agent: str = "networking", model: str = "",
+                     session_id: str = "", user_id: str = "", workspace_id: str = "",
+                     context: dict[str, Any] | None = None,
+                     history: list[dict[str, str]] | None = None) -> Iterator[dict[str, Any]]:
+        """Yield SSE events from an agent (text_delta, confirm, model_info,
+        tool_call/result, error and done)."""
+        if not query.strip():
+            raise ValueError("chat.stream_agent: query is required")
+        return self.client._stream(
+            "POST", self.client.node_url + "/api/v3/ai/agent/chat",
+            op="chat.stream_agent", json_body={"query": query, "agent": agent,
+            "model": model, "session_id": session_id, "user_id": user_id,
+            "workspace_id": workspace_id, "context": context or {},
+            "history": history or [], "stream": True})
+
+    def stream_workflow(self, *, query: str, model: str = "", session_id: str = "",
+                        user_id: str = "", nodes: list[Any] | None = None,
+                        edges: list[Any] | None = None, history: list[dict[str, str]] | None = None,
+                        action: str = "generate", mode: str = "build",
+                        confirm_run: bool = False) -> Iterator[dict[str, Any]]:
+        """Yield workflow-agent SSE events. ``confirm_run`` is an explicit
+        client-side guard; the node applies its own exact confirmation policy."""
+        if not query.strip():
+            raise ValueError("chat.stream_workflow: query is required")
+        if confirm_run and query.strip().lower() not in ("run it", "yes, run it", "go ahead and run it"):
+            raise ValueError("chat.stream_workflow: confirm_run requires an explicit run-it command")
+        return self.client._stream(
+            "POST", self.client.node_url + "/api/v2/workflow/agent/chat",
+            op="chat.stream_workflow", json_body={"query": query, "model": model,
+            "session_id": session_id, "user_id": user_id, "action": action,
+            "mode": mode, "surface": "chat", "history": history or [],
+            "nodes": nodes or [], "edges": edges or [], "stream": True})
+
+    def mission_command(self, command: str, *, conversation_id: str = "", timezone: str = "") -> dict[str, Any]:
+        if not command.strip():
+            raise ValueError("chat.mission_command: command is required")
+        return self.client._json(
+            "POST", self.client.node_url + "/api/v2/vxchrono/chat/command",
+            op="chat.mission_command", json_body={"command": command, "surface": "chat",
+                                                   "conversation_id": conversation_id, "timezone": timezone})
 
 
 # ── Observability (backups, migrations, sync) ──────────────────────────
@@ -5576,6 +5674,9 @@ class Client:
         self.networks = Networks(self)
         self.agents = Agents(self)
         self.chat = Chat(self)
+        # Alias kept explicit so callers can discover history APIs as either
+        # ``client.chat`` or ``client.conversations``.
+        self.conversations = self.chat
         self.observability = Observability(self)
         self.billing = Billing(self)
         self.workspace = Workspace(self)
@@ -5850,6 +5951,53 @@ class Client:
         if isinstance(data, list):
             return {"data": data}
         return data
+
+    def _stream(self, method: str, url: str, *, op: str, json_body: Any | None = None,
+                timeout: int = DEFAULT_LONG_TIMEOUT) -> Iterator[dict[str, Any]]:
+        """Open an authenticated SSE request and yield decoded event frames."""
+        body = json.dumps(json_body or {}).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Accept": "text/event-stream",
+                   "Cache-Control": "no-cache", "User-Agent": self.user_agent,
+                   "vx-request-id": uuid.uuid4().hex}
+        headers.update(self._auth_headers(url))
+        req = urllib.request.Request(url, method=method, data=body, headers=headers)
+        try:
+            response = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            detail = (e.read() or b"").decode("utf-8", "replace")[:800]
+            raise _from_http(op, e.code, _http_reason(e.code), detail) from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise VxNetworkError(op, "stream transport", cause=e) from e
+
+        def frames() -> Iterator[dict[str, Any]]:
+            named = ""
+            try:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        named = line[6:].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw:
+                        continue
+                    try:
+                        data: Any = json.loads(raw)
+                    except Exception:
+                        data = raw
+                    event = named or "message"
+                    if isinstance(data, dict):
+                        event = str(data.get("type") or data.get("event") or event)
+                        if not named and "data" in data:
+                            data = data["data"]
+                    yield {"event": event, "data": data, "raw": raw}
+                    named = ""
+            finally:
+                response.close()
+        return frames()
 
     def _multipart(self, url: str, fields: dict[str, str],
                    files: list[tuple[str, str, bytes, str]], *, op: str,

@@ -1,4 +1,7 @@
-# vxsdk-go — Changelog
+## [2026.10.29]
+
+- Added conversation history CRUD, SSE agent/workflow streams and Mission Control chat commands to Go and vxcli.
+- Workflow chat clients require an explicit run-it confirmation before execution.# vxsdk-go — Changelog
 
 ## Unreleased
 

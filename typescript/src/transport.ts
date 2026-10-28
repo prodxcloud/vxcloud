@@ -36,6 +36,16 @@ export interface JSONResponse<T> {
   raw: Record<string, unknown> | unknown;
 }
 
+/** A decoded Server-Sent Events frame.  VxCloud sends either a named
+ * `event:` frame or a JSON object whose `type`/`event` field names the event.
+ * The raw JSON is retained so callers can opt into newer fields without an
+ * SDK release. */
+export interface SSEEvent {
+  event: string;
+  data: unknown;
+  raw: string;
+}
+
 export class Transport {
   private state: AuthState;
   private nodeURL: string;
@@ -113,6 +123,68 @@ export class Transport {
       body: JSON.stringify(body ?? {}),
       headers: { 'Content-Type': 'application/json' },
     }, opts);
+  }
+
+  /** Stream a JSON POST as SSE. The generator owns the response body and
+   * closes it when iteration ends or the caller stops early. */
+  async *postSSE(path: string, body: unknown, opts?: CallOptions): AsyncGenerator<SSEEvent> {
+    const url = this.absoluteURL(path);
+    const ctrl = new AbortController();
+    if (opts?.signal) opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    const headers: Record<string, string> = {
+      'Accept': 'text/event-stream',
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      'User-Agent': this.userAgent,
+      ...authHeaders(this.state),
+      ...(opts?.headers ?? {}),
+    };
+    const res = await this.fetchImpl(url, {
+      method: 'POST', headers, body: JSON.stringify(body ?? {}), signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).slice(0, 800);
+      throw fromHTTP(res.status, detail || res.statusText, 'stream', res.headers.get('Retry-After'));
+    }
+    if (!res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let named = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith(':')) continue;
+          if (line.startsWith('event:')) { named = line.slice(6).trim(); continue; }
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          let parsed: unknown = raw;
+          try { parsed = JSON.parse(raw); } catch { /* plain text SSE */ }
+          let event = named || 'message';
+          if (parsed && typeof parsed === 'object') {
+            const record = parsed as Record<string, unknown>;
+            if (typeof record.type === 'string') event = record.type;
+            else if (typeof record.event === 'string') event = record.event;
+            if (record.data !== undefined && named === '') parsed = record.data;
+          }
+          yield { event, data: parsed, raw };
+          named = '';
+        }
+      }
+      const tail = buffer.trim();
+      if (tail.startsWith('data:')) {
+        const raw = tail.slice(5).trim();
+        if (raw) { let data: unknown = raw; try { data = JSON.parse(raw); } catch {} yield { event: named || 'message', data, raw }; }
+      }
+    } finally {
+      try { await reader.cancel(); } catch { /* already closed */ }
+    }
   }
 
   /**

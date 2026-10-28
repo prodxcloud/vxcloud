@@ -9,9 +9,14 @@
 package chat
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/prodxcloud/vxcloud/transport"
 )
@@ -68,6 +73,55 @@ type SendOutput struct {
 	InputTokens  int                    `json:"input_tokens,omitempty"`
 	OutputTokens int                    `json:"output_tokens,omitempty"`
 	Raw          map[string]interface{} `json:"-"`
+}
+
+type Conversation struct {
+	SessionID     string `json:"session_id"`
+	Title         string `json:"title"`
+	FirstQuery    string `json:"first_query"`
+	AgentType     string `json:"agent_type"`
+	MessageCount  int    `json:"message_count"`
+	StartedAt     string `json:"started_at"`
+	LastMessageAt string `json:"last_message_at"`
+}
+
+type ConversationHistoryEntry struct {
+	ID        string                 `json:"id"`
+	SessionID string                 `json:"session_id"`
+	UserID    string                 `json:"user_id"`
+	AgentType string                 `json:"agent_type"`
+	Query     string                 `json:"query"`
+	Response  string                 `json:"response"`
+	Timestamp string                 `json:"timestamp"`
+	Title     string                 `json:"title"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	AIModel   string                 `json:"ai_model"`
+	Intent    string                 `json:"intent"`
+}
+
+type ConversationList struct {
+	Conversations []Conversation `json:"conversations"`
+	Total         int            `json:"total"`
+	Limit         int            `json:"limit"`
+	Offset        int            `json:"offset"`
+}
+
+type StreamEvent struct {
+	Event string
+	Data  interface{}
+	Raw   string
+	Err   error
+}
+
+type AgentStreamInput struct {
+	Query       string
+	Agent       string
+	Model       string
+	SessionID   string
+	UserID      string
+	WorkspaceID string
+	Context     map[string]interface{}
+	History     []Message
 }
 
 // Send issues a one-shot chat completion request. The platform routes
@@ -132,4 +186,175 @@ func (c *Client) Quick(ctx context.Context, provider Provider, model, question s
 		return "", err
 	}
 	return out.Completion, nil
+}
+
+func (c *Client) ListConversations(ctx context.Context, limit, offset int, search, agentType string, sessionIDs []string) (*ConversationList, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	v := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+	if search != "" {
+		v.Set("q", search)
+	}
+	if agentType != "" {
+		v.Set("agent_type", agentType)
+	}
+	if len(sessionIDs) > 0 {
+		v.Set("session_ids", strings.Join(sessionIDs, ","))
+	}
+	var out ConversationList
+	if err := c.T.JSON(ctx, "chat.ListConversations", "GET", transport.JoinURL(c.NodeURL, "/api/v3/ai/agent/conversations")+"?"+v.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) History(ctx context.Context, sessionID string, agentType string) ([]ConversationHistoryEntry, error) {
+	if sessionID == "" {
+		return nil, errors.New("chat.History: sessionID is required")
+	}
+	v := url.Values{"session_id": {sessionID}, "limit": {"5000"}}
+	if agentType != "" {
+		v.Set("agent_type", agentType)
+	}
+	var raw struct {
+		History []ConversationHistoryEntry `json:"history"`
+	}
+	if err := c.T.JSON(ctx, "chat.History", "GET", transport.JoinURL(c.NodeURL, "/api/v3/ai/agent/history")+"?"+v.Encode(), nil, &raw); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(raw.History)-1; i < j; i, j = i+1, j-1 {
+		raw.History[i], raw.History[j] = raw.History[j], raw.History[i]
+	}
+	return raw.History, nil
+}
+
+func (c *Client) SaveMessage(ctx context.Context, sessionID, messageType, content, agentType string) (map[string]interface{}, error) {
+	if sessionID == "" || content == "" {
+		return nil, errors.New("chat.SaveMessage: sessionID and content are required")
+	}
+	if messageType != "human" && messageType != "ai" {
+		return nil, errors.New("chat.SaveMessage: messageType must be human or ai")
+	}
+	var out map[string]interface{}
+	err := c.T.JSON(ctx, "chat.SaveMessage", "POST", transport.JoinURL(c.NodeURL, "/api/v3/ai/agent/conversation/save"), map[string]interface{}{"session_id": sessionID, "message_type": messageType, "content": content, "agent_type": agentType}, &out)
+	return out, err
+}
+func (c *Client) RenameConversation(ctx context.Context, sessionID, title string) (map[string]interface{}, error) {
+	if sessionID == "" || strings.TrimSpace(title) == "" {
+		return nil, errors.New("chat.RenameConversation: sessionID and title are required")
+	}
+	var out map[string]interface{}
+	err := c.T.JSON(ctx, "chat.RenameConversation", "POST", transport.JoinURL(c.NodeURL, "/api/v3/ai/agent/conversation/rename"), map[string]interface{}{"session_id": sessionID, "title": title}, &out)
+	return out, err
+}
+func (c *Client) DeleteConversation(ctx context.Context, sessionID string) (map[string]interface{}, error) {
+	if sessionID == "" {
+		return nil, errors.New("chat.DeleteConversation: sessionID is required")
+	}
+	var out map[string]interface{}
+	err := c.T.JSON(ctx, "chat.DeleteConversation", "POST", transport.JoinURL(c.NodeURL, "/api/v3/ai/agent/conversation/delete"), map[string]interface{}{"session_id": sessionID}, &out)
+	return out, err
+}
+
+func (c *Client) streamEvents(ctx context.Context, op, path string, body map[string]interface{}) (<-chan StreamEvent, error) {
+	resp, err := c.T.StreamJSON(ctx, op, "POST", transport.JoinURL(c.NodeURL, path), body, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan StreamEvent)
+	go func() {
+		defer close(out)
+		defer resp.Close()
+		scan := bufio.NewScanner(resp)
+		scan.Buffer(make([]byte, 4096), 4*1024*1024)
+		named := ""
+		for scan.Scan() {
+			line := strings.TrimRight(scan.Text(), "\r")
+			if strings.HasPrefix(line, ":") {
+				continue
+			}
+			if strings.HasPrefix(line, "event:") {
+				named = strings.TrimSpace(line[6:])
+				continue
+			}
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			raw := strings.TrimSpace(line[5:])
+			if raw == "" {
+				continue
+			}
+			var data interface{}
+			if json.Unmarshal([]byte(raw), &data) != nil {
+				data = raw
+			}
+			event := named
+			if event == "" {
+				event = "message"
+			}
+			if obj, ok := data.(map[string]interface{}); ok {
+				if s, ok := obj["type"].(string); ok {
+					event = s
+				}
+				if s, ok := obj["event"].(string); ok && event == "message" {
+					event = s
+				}
+				if named == "" {
+					if inner, ok := obj["data"]; ok {
+						data = inner
+					}
+				}
+			}
+			out <- StreamEvent{Event: event, Data: data, Raw: raw}
+			named = ""
+		}
+		if err := scan.Err(); err != nil {
+			out <- StreamEvent{Err: err}
+		}
+	}()
+	return out, nil
+}
+
+// StreamAgent starts the FastAPI agent stream. The returned channel closes on
+// EOF; inspect StreamEvent.Err for a transport or decoding failure.
+func (c *Client) StreamAgent(ctx context.Context, in AgentStreamInput) (<-chan StreamEvent, error) {
+	if strings.TrimSpace(in.Query) == "" {
+		return nil, errors.New("chat.StreamAgent: Query is required")
+	}
+	body := map[string]interface{}{"query": in.Query, "agent": in.Agent, "model": in.Model, "session_id": in.SessionID, "user_id": in.UserID, "workspace_id": in.WorkspaceID, "context": in.Context, "history": in.History, "stream": true}
+	if body["agent"] == "" {
+		body["agent"] = "networking"
+	}
+	return c.streamEvents(ctx, "chat.StreamAgent", "/api/v3/ai/agent/chat", body)
+}
+
+// StreamWorkflow streams workflow-agent planning events. A workflow is never
+// run by this method unless confirmRun is true and query is an explicit
+// confirmation phrase accepted by the platform.
+func (c *Client) StreamWorkflow(ctx context.Context, in AgentStreamInput, nodes, edges []interface{}, confirmRun bool) (<-chan StreamEvent, error) {
+	if strings.TrimSpace(in.Query) == "" {
+		return nil, errors.New("chat.StreamWorkflow: Query is required")
+	}
+	q := strings.ToLower(strings.TrimSpace(in.Query))
+	if confirmRun && q != "run it" && q != "yes, run it" && q != "go ahead and run it" {
+		return nil, errors.New("chat.StreamWorkflow: confirmRun requires an explicit run-it command")
+	}
+	body := map[string]interface{}{"query": in.Query, "model": in.Model, "session_id": in.SessionID, "user_id": in.UserID, "action": "generate", "mode": "build", "surface": "chat", "history": in.History, "nodes": nodes, "edges": edges, "stream": true}
+	if confirmRun {
+		body["action"] = "run"
+	}
+	return c.streamEvents(ctx, "chat.StreamWorkflow", "/api/v2/workflow/agent/chat", body)
+}
+
+func (c *Client) MissionCommand(ctx context.Context, command, conversationID, timezone string) (map[string]interface{}, error) {
+	if strings.TrimSpace(command) == "" {
+		return nil, errors.New("chat.MissionCommand: command is required")
+	}
+	var out map[string]interface{}
+	err := c.T.JSON(ctx, "chat.MissionCommand", "POST", transport.JoinURL(c.NodeURL, "/api/v2/vxchrono/chat/command"), map[string]interface{}{"command": command, "surface": "chat", "conversation_id": conversationID, "timezone": timezone}, &out)
+	return out, err
 }

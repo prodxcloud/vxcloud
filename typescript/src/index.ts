@@ -43,7 +43,7 @@ export type {
 // wrap yet. It is also the seam to stub in tests (`new Leads(fakeTransport)`).
 export {
   Transport,
-  type TransportOptions, type CallOptions, type JSONResponse, type MultipartFile,
+  type TransportOptions, type CallOptions, type JSONResponse, type MultipartFile, type SSEEvent,
 } from './transport.js';
 export { Services, ServicesVM } from './services.js';
 export { Sessions } from './sessions.js';
@@ -65,6 +65,8 @@ export {
 } from './agents.js';
 export {
   Chat, type ChatProvider, type ChatMessage, type ChatSendInput, type ChatSendOutput,
+  type Conversation, type ConversationHistoryEntry, type ConversationList,
+  type AgentStreamInput, type WorkflowChatInput, type AgentStreamEvent,
 } from './chat.js';
 export {
   Observability, Backups, Migrations, SyncSub,

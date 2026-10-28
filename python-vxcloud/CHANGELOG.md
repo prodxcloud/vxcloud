@@ -1,4 +1,8 @@
-# vxcloud Python — Changelog
+## [2026.10.29]
+
+- Added conversation list/search/paging plus history, save, rename and delete helpers.
+- Added sync/async SSE agent and workflow chat streams with model/approval event passthrough.
+- Added explicit-confirmation workflow chat and Mission Control command helpers.# vxcloud Python — Changelog
 
 All `vxcloud` releases are thin shims over `vxsdk`. Each version pins the
 matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to

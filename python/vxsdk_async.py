@@ -519,6 +519,75 @@ class _AsyncVxComputer(_AsyncResource):
             json_body={"objective": objective, "channel": channel,
                        "session_id": session_id})
 
+
+class _AsyncChat(_AsyncResource):
+    """Async counterpart of ``vxsdk.Chat`` for history and agent streams."""
+
+    async def list_conversations(self, *, limit: int = 50, offset: int = 0,
+                                 search: str = "", agent_type: str = "",
+                                 session_ids: Iterable[str] | None = None) -> dict[str, Any]:
+        q: dict[str, Any] = {"limit": int(limit), "offset": int(offset)}
+        if search: q["q"] = search
+        if agent_type: q["agent_type"] = agent_type
+        if session_ids: q["session_ids"] = ",".join(str(x) for x in session_ids)
+        return await self.client._json("GET", self.client.node_url + "/api/v3/ai/agent/conversations?" + urllib.parse.urlencode(q), op="chat.list_conversations")
+
+    async def history(self, session_id: str, *, agent_type: str = "", limit: int = 5000) -> list[dict[str, Any]]:
+        if not session_id: raise ValueError("chat.history: session_id is required")
+        q: dict[str, Any] = {"session_id": session_id, "limit": int(limit)}
+        if agent_type: q["agent_type"] = agent_type
+        body = await self.client._json("GET", self.client.node_url + "/api/v3/ai/agent/history?" + urllib.parse.urlencode(q), op="chat.history")
+        rows = list(body.get("history") or []); rows.reverse(); return rows
+
+    async def save_message(self, *, session_id: str, message_type: str, content: str, agent_type: str = "") -> dict[str, Any]:
+        if not session_id or not content: raise ValueError("chat.save_message: session_id and content are required")
+        if message_type not in ("human", "ai"): raise ValueError("chat.save_message: message_type must be human or ai")
+        return await self.client._json("POST", self.client.node_url + "/api/v3/ai/agent/conversation/save", op="chat.save_message", json_body={"session_id": session_id, "message_type": message_type, "content": content, "agent_type": agent_type})
+
+    async def rename_conversation(self, session_id: str, title: str) -> dict[str, Any]:
+        if not session_id or not title.strip(): raise ValueError("chat.rename_conversation: session_id and title are required")
+        return await self.client._json("POST", self.client.node_url + "/api/v3/ai/agent/conversation/rename", op="chat.rename_conversation", json_body={"session_id": session_id, "title": title})
+
+    async def delete_conversation(self, session_id: str) -> dict[str, Any]:
+        if not session_id: raise ValueError("chat.delete_conversation: session_id is required")
+        return await self.client._json("POST", self.client.node_url + "/api/v3/ai/agent/conversation/delete", op="chat.delete_conversation", json_body={"session_id": session_id})
+
+    def stream_agent(self, *, query: str, agent: str = "networking", model: str = "", session_id: str = "", user_id: str = "", workspace_id: str = "", context: dict[str, Any] | None = None, history: list[dict[str, str]] | None = None) -> AsyncIterator[dict[str, Any]]:
+        if not query.strip(): raise ValueError("chat.stream_agent: query is required")
+        return self._stream("/api/v3/ai/agent/chat", {"query": query, "agent": agent, "model": model, "session_id": session_id, "user_id": user_id, "workspace_id": workspace_id, "context": context or {}, "history": history or [], "stream": True})
+
+    def stream_workflow(self, *, query: str, model: str = "", session_id: str = "", user_id: str = "", nodes: list[Any] | None = None, edges: list[Any] | None = None, history: list[dict[str, str]] | None = None, action: str = "generate", mode: str = "build", confirm_run: bool = False) -> AsyncIterator[dict[str, Any]]:
+        if not query.strip(): raise ValueError("chat.stream_workflow: query is required")
+        if confirm_run and query.strip().lower() not in ("run it", "yes, run it", "go ahead and run it"): raise ValueError("chat.stream_workflow: confirm_run requires an explicit run-it command")
+        return self._stream("/api/v2/workflow/agent/chat", {"query": query, "model": model, "session_id": session_id, "user_id": user_id, "action": action, "mode": mode, "surface": "chat", "history": history or [], "nodes": nodes or [], "edges": edges or [], "stream": True})
+
+    async def mission_command(self, command: str, *, conversation_id: str = "", timezone: str = "") -> dict[str, Any]:
+        if not command.strip(): raise ValueError("chat.mission_command: command is required")
+        return await self.client._json("POST", self.client.node_url + "/api/v2/vxchrono/chat/command", op="chat.mission_command", json_body={"command": command, "surface": "chat", "conversation_id": conversation_id, "timezone": timezone})
+
+    async def _stream(self, path: str, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        assert self.client._http is not None, "use AsyncClient inside `async with`"
+        url = self.client.node_url + path
+        headers = {"Accept": "text/event-stream", "Content-Type": "application/json", "Cache-Control": "no-cache", "User-Agent": self.client.user_agent, "vx-request-id": uuid.uuid4().hex, **self.client._auth_headers()}
+        async with self.client._http.stream("POST", url, headers=headers, json=payload, timeout=httpx.Timeout(DEFAULT_LONG_TIMEOUT)) as response:
+            if response.status_code >= 300:
+                raise VxError("chat.stream", f"HTTP {response.status_code}", response.status_code, (await response.aread()).decode("utf-8", "replace")[:800])
+            named = ""
+            async for raw_line in response.aiter_lines():
+                line = raw_line.rstrip("\r\n")
+                if line.startswith(":"): continue
+                if line.startswith("event:"): named = line[6:].strip(); continue
+                if not line.startswith("data:"): continue
+                raw = line[5:].strip()
+                if not raw: continue
+                try: data: Any = json.loads(raw)
+                except Exception: data = raw
+                event = named or "message"
+                if isinstance(data, dict):
+                    event = str(data.get("type") or data.get("event") or event)
+                    if not named and "data" in data: data = data["data"]
+                yield {"event": event, "data": data, "raw": raw}; named = ""
+
     async def resolve_approval(self, run_id: str, step_id: str, command: str,
                                *, decision: str = "approve", ttl_seconds: int = 900,
                                approver: str = "") -> dict[str, Any]:
@@ -1763,6 +1832,8 @@ class AsyncClient:
         self.cloud = _AsyncCloud(self)
         self.nodes = _AsyncNodes(self)
         self.vxcomputer = _AsyncVxComputer(self)
+        self.chat = _AsyncChat(self)
+        self.conversations = self.chat
         self.vxchrono = _AsyncVxChrono(self)
         self.workspace = _AsyncWorkspace(self)
         self.workflow = _AsyncWorkflow(self)

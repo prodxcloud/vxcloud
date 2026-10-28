@@ -54,7 +54,7 @@ import { WebScraper } from './webscraper.js';
 import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.10.28';
+export const VERSION = '2026.10.29';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */
@@ -105,6 +105,8 @@ export class VxCloud {
    *  the non-secret integration edit. */
   readonly salesshiftSettings: SalesShiftSettings;
   readonly chat: Chat;
+  /** Conversation history and streaming agent helpers (alias of `chat`). */
+  readonly conversations: Chat;
   readonly cicd: CICD;
   readonly cloud: Cloud;
   readonly deploy: Deploy;
@@ -179,6 +181,7 @@ export class VxCloud {
     this.campaigns = new SalesShiftCampaigns(this.t);
     this.salesshiftSettings = new SalesShiftSettings(this.t);
     this.chat = new Chat(this.t);
+    this.conversations = this.chat;
     this.cicd = new CICD(this.t);
     this.cloud = new Cloud(this.t);
     this.deploy = new Deploy(this.t);
