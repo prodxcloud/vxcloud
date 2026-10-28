@@ -5,6 +5,17 @@ Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [2026.10.28]
+
+### Added
+- `salesshift.verifyEmail(email)` → `VerifyReport` and
+  `salesshift.verifierStatus()` → `VerifierStatus` — the Lead Verifier
+  (`/api/v1/salesshift/verifier/check` and `/verifier/status`), plus the
+  `isDeliverable()` helper and `VERIFIER_PER_*` limit constants. 12 checks per
+  user per minute, 150 per workspace per hour.
+
 ## [2026.8.28]
 
 **Contact address changed** to `joelwembo@outlook.com` — the account that owns

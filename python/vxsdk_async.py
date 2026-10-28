@@ -490,7 +490,7 @@ class _AsyncNodes(_AsyncResource):
         return None
 
 
-# ── Async VXCOMPUTER / Robotic / VxChrono ──────────────────────────────
+# ── Async VXCOMPUTER / VxChrono ──────────────────────────────
 
 class _AsyncVxComputer(_AsyncResource):
     async def info(self) -> dict[str, Any]:
@@ -533,79 +533,6 @@ class _AsyncVxComputer(_AsyncResource):
         return await self.client._json("GET",
             self.client.node_url + "/api/v2/vxcomputer/audit/verify",
             op="vxcomputer.audit_verify")
-
-
-class _AsyncRobotic(_AsyncResource):
-    async def info(self) -> dict[str, Any]:
-        return await self.client._json("GET", self.client.node_url + "/api/v2/robotic/info",
-                                       op="robotic.info")
-
-    async def list(self) -> dict[str, Any]:
-        return await self.client._json("GET", self.client.node_url + "/api/v2/robotic/robots",
-                                       op="robotic.list")
-
-    async def register(self, spec: dict[str, Any]) -> dict[str, Any]:
-        return await self.client._json("POST", self.client.node_url + "/api/v2/robotic/robots",
-                                       op="robotic.register", json_body=spec)
-
-    async def get(self, robot_id: str) -> dict[str, Any]:
-        return await self.client._json("GET",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}",
-            op="robotic.get")
-
-    async def delete(self, robot_id: str) -> dict[str, Any]:
-        return await self.client._json("DELETE",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}",
-            op="robotic.delete")
-
-    async def command(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/command",
-            op="robotic.command", json_body=payload)
-
-    async def command_status(self, command_id: str) -> dict[str, Any]:
-        return await self.client._json("GET",
-            self.client.node_url + f"/api/v2/robotic/commands/{command_id}",
-            op="robotic.command_status")
-
-    async def emergency_stop(self, robot_id: str) -> dict[str, Any]:
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/emergency-stop",
-            op="robotic.emergency_stop", json_body={})
-
-    async def telemetry(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/telemetry",
-            op="robotic.telemetry", json_body=payload)
-
-    async def resolve_approval(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/approval/resolve",
-            op="robotic.resolve_approval", json_body=payload)
-
-    async def plan(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Autonomous LLM mission plan (payload: objective, execute, provider, model)."""
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/plan",
-            op="robotic.plan", json_body=payload)
-
-    async def schedule(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Schedule a recurring mission via vxchrono (payload: objective, schedule_type, cadence_minutes|cron_expr)."""
-        return await self.client._json("POST",
-            self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/schedule",
-            op="robotic.schedule", json_body=payload)
-
-    async def fleet_command(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self.client._json("POST",
-            self.client.node_url + "/api/v2/robotic/fleet/command",
-            op="robotic.fleet_command", json_body=payload)
-
-    async def fleet_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Multi-robot mission via the workflow engine + per-robot LLM plan
-        (payload: objective, robot_ids|robot_type|tags)."""
-        return await self.client._json("POST",
-            self.client.node_url + "/api/v2/robotic/fleet/mission",
-            op="robotic.fleet_mission", json_body=payload)
 
 
 class _AsyncVxChrono(_AsyncResource):
@@ -1279,6 +1206,39 @@ class _AsyncSalesShift(_AsyncResource):
             op="salesshift.get_worker_health",
         )
 
+    # ── Lead Verifier ── (see the sync SalesShift for the contract)
+
+    VERIFIER_PER_USER_PER_MINUTE = 12
+    VERIFIER_PER_WORKSPACE_PER_HOUR = 150
+
+    async def verify_email(self, email: str, *, timeout: float = 60) -> dict[str, Any]:
+        """Verify one address and return the full report (verdict, score,
+        grade, headline, reasons, steps...). Takes 2-20 s and spends one
+        metered check (12/user/minute, 150/workspace/hour)."""
+        email = (email or "").strip()
+        if not email:
+            raise VxValidationError("salesshift.verify_email", "email is required")
+        body = await self.client._json(
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/verifier/check",
+            op="salesshift.verify_email", json_body={"email": email}, timeout=timeout,
+        )
+        report = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(report, dict):
+            raise VxError("salesshift.verify_email", "the server answered without a report")
+        return report
+
+    async def verifier_status(self, *, timeout: float = 60) -> dict[str, Any]:
+        """Verification engine health: ``{probe_from, egress, healthy,
+        checks[], checked_at, limits{}, cached}``. Cached 60 s server-side."""
+        body = await self.client._json(
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/verifier/status",
+            op="salesshift.verifier_status", timeout=timeout,
+        )
+        body = body if isinstance(body, dict) else {}
+        data = dict(body.get("data") or {})
+        data["cached"] = bool(body.get("cached"))
+        return data
+
     # ── leads: transport ──
 
     def _leads_url(self, path: str) -> str:
@@ -1803,7 +1763,6 @@ class AsyncClient:
         self.cloud = _AsyncCloud(self)
         self.nodes = _AsyncNodes(self)
         self.vxcomputer = _AsyncVxComputer(self)
-        self.robotic = _AsyncRobotic(self)
         self.vxchrono = _AsyncVxChrono(self)
         self.workspace = _AsyncWorkspace(self)
         self.workflow = _AsyncWorkflow(self)
@@ -1867,6 +1826,9 @@ class AsyncClient:
             h["Authorization"] = f"Bearer {self.access_token}"
         if self.api_key:
             h["X-API-Key"] = self.api_key
+            # Vault-issued developer keys need the username they belong to.
+            if self.username:
+                h["X-Username"] = self.username
         return h
 
     async def _refresh(self) -> None:

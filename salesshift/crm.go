@@ -11,17 +11,24 @@ package salesshift
 //	POST   /api/v1/salesshift/contacts/{id}/notes
 //	GET    /api/v1/salesshift/contacts/{id}/activities
 //	GET    /api/v1/salesshift/lists
+//	POST   /api/v1/salesshift/lists/{id}/members
+//	POST   /api/v1/salesshift/lists/{id}/members/remove
+//	POST   /api/v1/salesshift/contacts/bulk
+//	POST   /api/v1/salesshift/contacts/bulk-update
 //
 // A pool lead is a masked snapshot and cannot be emailed. A Contact owns its
 // address outright, which is why every send path in this package takes a
 // contact id rather than an address.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	neturl "net/url"
 	"strconv"
+	"strings"
 
 	"github.com/prodxcloud/vxcloud/transport"
 )
@@ -41,7 +48,10 @@ type Contact struct {
 	Seniority      string `json:"seniority"`
 	LinkedInURL    string `json:"linkedin_url"`
 	City           string `json:"city"`
+	StateProvince  string `json:"state_province"`
 	Country        string `json:"country"`
+	// Timezone is the contact's IANA zone, used for recipient-local sending.
+	Timezone       string `json:"timezone"`
 	Source         string `json:"source"`
 	Status         string `json:"status"`
 	LifecycleStage string `json:"lifecycle_stage"`
@@ -307,4 +317,206 @@ func (c *Client) ListContactLists(ctx context.Context) ([]ContactList, error) {
 		return nil, fmt.Errorf("salesshift.ListContactLists: %w", err)
 	}
 	return raw.Data, nil
+}
+
+// Params returns the filter as the object form the bulk routes accept for
+// "all matching" — the same keys GET /contacts takes as query parameters.
+func (f ContactFilter) Params() map[string]any {
+	out := map[string]any{}
+	vals, _ := neturl.ParseQuery(strings.TrimPrefix(f.query(), "?"))
+	for k, v := range vals {
+		if len(v) > 0 && k != "page" && k != "limit" {
+			out[k] = v[0]
+		}
+	}
+	return out
+}
+
+// MaxBulkSelector is the per-call cap on ContactIDs and on Emails.
+const MaxBulkSelector = 1000
+
+// ContactSelector picks contacts for a bulk operation. Set exactly one of:
+// ContactIDs (≤1000), Emails (≤1000), or Filter — the GET /contacts query as
+// an object, meaning every matching contact (see ContactFilter.Params).
+type ContactSelector struct {
+	ContactIDs []string
+	Emails     []string
+	Filter     map[string]any
+}
+
+func (s ContactSelector) body(op string) (map[string]any, error) {
+	n := 0
+	body := map[string]any{}
+	if len(s.ContactIDs) > 0 {
+		n++
+		body["contact_ids"] = s.ContactIDs
+	}
+	if len(s.Emails) > 0 {
+		n++
+		body["emails"] = s.Emails
+	}
+	if s.Filter != nil {
+		n++
+		body["filter"] = s.Filter
+	}
+	switch {
+	case n == 0:
+		return nil, fmt.Errorf("salesshift.%s: set ContactIDs, Emails or Filter", op)
+	case n > 1:
+		return nil, fmt.Errorf("salesshift.%s: set only one of ContactIDs, Emails or Filter", op)
+	case len(s.ContactIDs) > MaxBulkSelector || len(s.Emails) > MaxBulkSelector:
+		return nil, fmt.Errorf("salesshift.%s: at most %d ids or emails per call", op, MaxBulkSelector)
+	}
+	return body, nil
+}
+
+// CountOrList decodes a field the server may send as a count or as the list
+// of affected items. Count is always set; Items only for a list.
+type CountOrList struct {
+	Count int
+	Items []any
+}
+
+// UnmarshalJSON accepts a number, an array or null.
+func (c *CountOrList) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || bytes.Equal(b, []byte("null")) {
+		*c = CountOrList{}
+		return nil
+	}
+	if b[0] == '[' {
+		var items []any
+		if err := json.Unmarshal(b, &items); err != nil {
+			return err
+		}
+		*c = CountOrList{Count: len(items), Items: items}
+		return nil
+	}
+	var f float64
+	if err := json.Unmarshal(b, &f); err != nil {
+		return err
+	}
+	*c = CountOrList{Count: int(f)}
+	return nil
+}
+
+// ListMembersResult reports an add-to-list. Added keeps its old meaning (new
+// memberships created); AlreadyInList and NotFound are skip-and-report.
+type ListMembersResult struct {
+	Success       bool        `json:"success"`
+	Added         int         `json:"added"`
+	AlreadyInList CountOrList `json:"already_in_list"`
+	NotFound      CountOrList `json:"not_found"`
+}
+
+// AddListMembers adds the selected contacts to a list.
+func (c *Client) AddListMembers(ctx context.Context, listID string, sel ContactSelector) (*ListMembersResult, error) {
+	if listID == "" {
+		return nil, errors.New("salesshift.AddListMembers: listID is required")
+	}
+	body, err := sel.body("AddListMembers")
+	if err != nil {
+		return nil, err
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/lists/"+listID+"/members")
+	var out ListMembersResult
+	if err := c.T.JSON(ctx, "salesshift.AddListMembers", "POST", url, body, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.AddListMembers: %w", err)
+	}
+	return &out, nil
+}
+
+// RemoveListMembers takes the selected contacts off a list (the contacts
+// themselves are kept) and returns how many memberships were removed.
+func (c *Client) RemoveListMembers(ctx context.Context, listID string, sel ContactSelector) (int, error) {
+	if listID == "" {
+		return 0, errors.New("salesshift.RemoveListMembers: listID is required")
+	}
+	body, err := sel.body("RemoveListMembers")
+	if err != nil {
+		return 0, err
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/lists/"+listID+"/members/remove")
+	var out struct {
+		Removed int `json:"removed"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.RemoveListMembers", "POST", url, body, &out); err != nil {
+		return 0, fmt.Errorf("salesshift.RemoveListMembers: %w", err)
+	}
+	return out.Removed, nil
+}
+
+// ContactBulkFields are the fields a bulk update may set. Only non-nil fields
+// are sent. Timezone is validated server-side; changing the location with no
+// timezone lets the server derive one.
+type ContactBulkFields struct {
+	CompanyName   *string `json:"company_name,omitempty"`
+	JobTitle      *string `json:"job_title,omitempty"`
+	Timezone      *string `json:"timezone,omitempty"`
+	City          *string `json:"city,omitempty"`
+	StateProvince *string `json:"state_province,omitempty"`
+	Country       *string `json:"country,omitempty"`
+}
+
+// BulkUpdateContacts sets the same fields on every selected contact and
+// returns how many were updated. Selection is by ContactIDs or Filter.
+func (c *Client) BulkUpdateContacts(ctx context.Context, sel ContactSelector, fields ContactBulkFields) (int, error) {
+	if len(sel.Emails) > 0 {
+		return 0, errors.New("salesshift.BulkUpdateContacts: select by ContactIDs or Filter")
+	}
+	body, err := sel.body("BulkUpdateContacts")
+	if err != nil {
+		return 0, err
+	}
+	if fields == (ContactBulkFields{}) {
+		return 0, errors.New("salesshift.BulkUpdateContacts: no fields to set")
+	}
+	body["fields"] = fields
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/bulk-update")
+	var out struct {
+		Updated int `json:"updated"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.BulkUpdateContacts", "POST", url, body, &out); err != nil {
+		return 0, fmt.Errorf("salesshift.BulkUpdateContacts: %w", err)
+	}
+	return out.Updated, nil
+}
+
+// ImportOptions tune a bulk import. Upsert updates existing contacts matched
+// by email (only non-empty incoming fields overwrite); ListID adds every
+// imported or updated contact to that list.
+type ImportOptions struct {
+	Upsert bool
+	ListID string
+}
+
+// ImportResult reports a bulk import.
+type ImportResult struct {
+	Success     bool           `json:"success"`
+	Created     int            `json:"created"`
+	Updated     int            `json:"updated"`
+	Skipped     int            `json:"skipped"`
+	AddedToList int            `json:"added_to_list"`
+	Columns     map[string]any `json:"columns"`
+}
+
+// ImportContacts bulk-creates (or, with Upsert, updates) contacts. Each row
+// is a contact object with at least "email".
+func (c *Client) ImportContacts(ctx context.Context, rows []map[string]any, opt ImportOptions) (*ImportResult, error) {
+	if len(rows) == 0 {
+		return nil, errors.New("salesshift.ImportContacts: rows is required")
+	}
+	body := map[string]any{"contacts": rows}
+	if opt.Upsert {
+		body["upsert"] = true
+	}
+	if opt.ListID != "" {
+		body["list_id"] = opt.ListID
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/contacts/bulk")
+	var out ImportResult
+	if err := c.T.JSON(ctx, "salesshift.ImportContacts", "POST", url, body, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.ImportContacts: %w", err)
+	}
+	return &out, nil
 }

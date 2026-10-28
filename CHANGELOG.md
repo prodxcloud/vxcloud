@@ -1,9 +1,41 @@
 # vxsdk-go — Changelog
 
+## Unreleased
+
+### Removed
+- Retired robotics APIs from the Go, Python (sync and async), and TypeScript SDKs.
+  The corresponding server routes and CLI commands have also been removed.
+
 All notable changes to the Go SDK. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 releases may break public API in any minor bump.
 
 ## [Unreleased]
+
+### Added — SalesShift Lead Verifier
+- `salesshift.Client.VerifyEmail(ctx, email)` → `*VerifyReport` (verdict,
+  0-100 score, A-F grade, headline, reasons, per-step evidence) via
+  `POST /api/v1/salesshift/verifier/check`, and
+  `salesshift.Client.VerifierStatus(ctx)` → `*VerifierStatus` via
+  `GET /api/v1/salesshift/verifier/status`. Same methods in Python
+  (`verify_email`, `verifier_status`, sync and async) and TypeScript
+  (`verifyEmail`, `verifierStatus`). Server limits: 12 checks per user per
+  minute, 150 per workspace per hour (429 otherwise).
+
+### Fixed — Vault developer keys (the vxcli / node key) authenticate
+- Every transport (Go, Python sync + async, TypeScript) now sends
+  `X-Username` next to `X-API-Key` when a username is configured. The API
+  accepts a Vault-issued developer key only together with its username;
+  without it every call answered 401 "Invalid or expired API key".
+  `users_apikey` keys are unaffected.
+
+## [2026.10.28]
+
+### Changed — coordinated SDK release
+
+- Published `@vxcloud/sdk`, `vxsdk`, and the `vxcloud` Python alias at
+  `2026.10.28` with the Lead Verifier, CRM, workflow, and settings surfaces
+  already present in this working tree.
+- Aligned the Go, C++, and Java version constants to the same CalVer release.
 
 ## [2026.8.28]
 

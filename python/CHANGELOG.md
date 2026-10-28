@@ -6,6 +6,16 @@ release tags (e.g. `v2026.6.10-1`). The 0.1.x preview line predates this switch.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [2026.10.28]
+
+### Added
+- `SalesShift.verify_email(email)` and `SalesShift.verifier_status()` (sync and
+  async) — the Lead Verifier (`/api/v1/salesshift/verifier/check` and
+  `/verifier/status`). 12 checks per user per minute, 150 per workspace per
+  hour; a refusal raises `VxRateLimitError`.
+
 ## [2026.8.28]
 
 **Contact address changed** to `joelwembo@outlook.com` — the account that owns

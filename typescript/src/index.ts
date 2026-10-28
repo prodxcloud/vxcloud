@@ -78,6 +78,9 @@ export {
 export {
   SalesShift,
   type SendEmailInput, type SendEmailResult, type TrackedEmail, type WorkerHealth,
+  type VerifyReport, type VerifyStep, type VerifyVerdict, type VerifyStepStatus,
+  type VerifierStatus, type VerifierCheck, isDeliverable,
+  VERIFIER_PER_USER_PER_MINUTE, VERIFIER_PER_WORKSPACE_PER_HOUR,
 } from './salesshift.js';
 // SalesShift platform surfaces — what the workspace pays for (billing) and
 // what it publishes (social), plus the signal pool, tasks and campaigns.
@@ -99,7 +102,16 @@ export {
   type Workflow as SalesShiftWorkflow,
   type WorkflowGraph, type WorkflowRun, type RunStep, type GraphIssue,
   type Sequence, type SequenceStep, type SequenceTotals, type SkipDetail, type Enrollment,
+  type SendWindow, type TemplateUsage, type TestSendResult,
+  type ContactSelector, type ContactBulkFields, type ListMembersResult, type ImportResult,
 } from './salesshift-crm.js';
+// SalesShift sending settings — email footers and the non-secret integration edit.
+export {
+  SalesShiftSettings, BUILTIN_FOOTER_TEXT, FOOTER_TEXT_MAX,
+  type EmailFooterSettings, type FooterPreview, type FooterFields,
+  type FooterAddressSource, type FooterTextSource,
+  type Mailbox as SalesShiftMailbox, type Integration as SalesShiftIntegration,
+} from './salesshift-settings.js';
 // Leads — the prospect pool. Separate from SalesShift on purpose: a lead is not
 // mailable until it is converted into a Contact.
 export {
@@ -144,7 +156,6 @@ export {
   VxComputer,
   type VxComputerRunInput, type VxComputerApprovalInput,
 } from './vxcomputer.js';
-export { Robotic } from './robotic.js';
 export {
   Connector,
   type ConnectorVMInput, type ConnectorDeployVMInput, type ConnectorBucketInput,

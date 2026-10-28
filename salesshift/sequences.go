@@ -13,6 +13,11 @@ package salesshift
 //	GET    /api/v1/salesshift/sequences/{id}/enrollments
 //	GET    /api/v1/salesshift/sequences/{id}/analytics
 //	POST   /api/v1/salesshift/sequences/dispatch-now
+//	POST   /api/v1/salesshift/sequences/{id}/test-send
+//	PUT    /api/v1/salesshift/steps/{step_id}
+//	POST   /api/v1/salesshift/steps/{step_id}/update-from-template
+//	GET    /api/v1/salesshift/campaigns/templates/{id}/usage
+//	POST   /api/v1/salesshift/campaigns/templates/{id}/update-steps
 //
 // A sequence differs from a campaign: a campaign is one blast to a fixed
 // audience, a sequence walks each contact through steps over days and stops
@@ -20,6 +25,7 @@ package salesshift
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	neturl "net/url"
@@ -44,6 +50,19 @@ type SequenceStep struct {
 	TaskNotes    string `json:"task_notes"`
 	TaskPriority string `json:"task_priority"`
 	IsActive     bool   `json:"is_active"`
+
+	// Template linkage. TemplateOutOfDate is true when the linked template was
+	// edited after it was last applied to this step.
+	TemplateID        string `json:"template_id"`
+	TemplateName      string `json:"template_name"`
+	TemplateOutOfDate bool   `json:"template_out_of_date"`
+}
+
+// SendWindow is one daily sending window, "HH:MM" to "HH:MM". A sequence has
+// up to three, non-overlapping.
+type SendWindow struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
 }
 
 // Sequence is one outbound play with its rollups. The counters are measured
@@ -60,6 +79,11 @@ type Sequence struct {
 	SendDays    []string `json:"send_days"`
 	SendTZ      string   `json:"send_timezone"`
 	DailyCap    *int     `json:"daily_cap"`
+
+	// RecipientLocal evaluates the windows and send days in each contact's own
+	// timezone (explicit → derived from location → SendTZ).
+	RecipientLocal bool         `json:"recipient_local"`
+	SendWindows    []SendWindow `json:"send_windows"`
 
 	StepsCount int            `json:"steps_count"`
 	Steps      []SequenceStep `json:"steps"`
@@ -159,6 +183,228 @@ type NewSequence struct {
 	SendTZ      string    `json:"send_timezone,omitempty"`
 	DailyCap    int       `json:"daily_cap,omitempty"`
 	Steps       []NewStep `json:"steps,omitempty"`
+}
+
+// SequencePatch is PUT /sequences/{id}. Only non-nil fields are sent.
+// SendTZ must be a valid IANA zone (the server answers 422 otherwise).
+type SequencePatch struct {
+	Name           *string       `json:"name,omitempty"`
+	Description    *string       `json:"description,omitempty"`
+	SendTZ         *string       `json:"send_timezone,omitempty"`
+	SendDays       []string      `json:"send_days,omitempty"`
+	DailyCap       *int          `json:"daily_cap,omitempty"`
+	StopOnReply    *bool         `json:"stop_on_reply,omitempty"`
+	RecipientLocal *bool         `json:"recipient_local,omitempty"`
+	SendWindows    *[]SendWindow `json:"send_windows,omitempty"`
+}
+
+// UpdateSequence applies a partial update, including recipient-local sending
+// and the daily send windows.
+func (c *Client) UpdateSequence(ctx context.Context, id string, p SequencePatch) (*Sequence, error) {
+	if id == "" {
+		return nil, errors.New("salesshift.UpdateSequence: id is required")
+	}
+	if p.SendWindows != nil && len(*p.SendWindows) > 3 {
+		return nil, errors.New("salesshift.UpdateSequence: at most 3 send windows")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+id)
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.UpdateSequence", "PUT", url, p, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateSequence: %w", err)
+	}
+	var out Sequence
+	if err := decodeData(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateSequence: decode: %w", err)
+	}
+	return &out, nil
+}
+
+// StepPatch is PUT /steps/{id}. Only set fields are sent.
+//
+// TemplateID links the step to a template; sent together with Subject or
+// BodyHTML it also stamps template_applied_at. UnlinkTemplate sends an
+// explicit null and wins over TemplateID.
+type StepPatch struct {
+	Name           *string
+	Subject        *string
+	BodyHTML       *string
+	DelayDays      *int
+	DelayHours     *int
+	IsActive       *bool
+	TemplateID     *string
+	UnlinkTemplate bool
+}
+
+// UpdateStep edits one step.
+func (c *Client) UpdateStep(ctx context.Context, stepID string, p StepPatch) (*SequenceStep, error) {
+	if stepID == "" {
+		return nil, errors.New("salesshift.UpdateStep: stepID is required")
+	}
+	body := map[string]any{}
+	if p.Name != nil {
+		body["name"] = *p.Name
+	}
+	if p.Subject != nil {
+		body["subject"] = *p.Subject
+	}
+	if p.BodyHTML != nil {
+		body["body_html"] = *p.BodyHTML
+	}
+	if p.DelayDays != nil {
+		body["delay_days"] = *p.DelayDays
+	}
+	if p.DelayHours != nil {
+		body["delay_hours"] = *p.DelayHours
+	}
+	if p.IsActive != nil {
+		body["is_active"] = *p.IsActive
+	}
+	switch {
+	case p.UnlinkTemplate:
+		body["template_id"] = nil
+	case p.TemplateID != nil:
+		body["template_id"] = *p.TemplateID
+	}
+	if len(body) == 0 {
+		return nil, errors.New("salesshift.UpdateStep: nothing to update")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/steps/"+stepID)
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.UpdateStep", "PUT", url, body, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateStep: %w", err)
+	}
+	var out SequenceStep
+	if err := decodeData(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateStep: decode: %w", err)
+	}
+	return &out, nil
+}
+
+// UpdateStepFromTemplate copies subject and body from the step's linked
+// template and returns the updated step.
+func (c *Client) UpdateStepFromTemplate(ctx context.Context, stepID string) (*SequenceStep, error) {
+	if stepID == "" {
+		return nil, errors.New("salesshift.UpdateStepFromTemplate: stepID is required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/steps/"+stepID+"/update-from-template")
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.UpdateStepFromTemplate", "POST", url, map[string]any{}, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateStepFromTemplate: %w", err)
+	}
+	var out SequenceStep
+	if err := decodeData(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateStepFromTemplate: decode: %w", err)
+	}
+	return &out, nil
+}
+
+// TemplatesPath is where the email templates live. Templates are served under
+// the campaigns prefix, so their usage and update-steps routes are too.
+const TemplatesPath = "/api/v1/salesshift/campaigns/templates"
+
+// TemplateUsage is one sequence step that uses a template.
+type TemplateUsage struct {
+	SequenceID   string `json:"sequence_id"`
+	SequenceName string `json:"sequence_name"`
+	StepID       string `json:"step_id"`
+	StepNumber   int    `json:"step_number"`
+	OutOfDate    bool   `json:"out_of_date"`
+}
+
+// TemplateUsage lists the sequence steps linked to a template.
+func (c *Client) TemplateUsage(ctx context.Context, templateID string) ([]TemplateUsage, error) {
+	if templateID == "" {
+		return nil, errors.New("salesshift.TemplateUsage: templateID is required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, TemplatesPath+"/"+templateID+"/usage")
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.TemplateUsage", "GET", url, nil, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.TemplateUsage: %w", err)
+	}
+	var out []TemplateUsage
+	if err := decodeData(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.TemplateUsage: decode: %w", err)
+	}
+	return out, nil
+}
+
+// TemplateStepsUpdate reports an update-steps pass.
+type TemplateStepsUpdate struct {
+	Updated int `json:"updated"`
+	// Sequences touched, as the server reports them (ids or summaries).
+	Sequences []any `json:"sequences"`
+}
+
+// UpdateTemplateSteps re-applies a template to the steps linked to it. With
+// no stepIDs every linked step is updated.
+func (c *Client) UpdateTemplateSteps(ctx context.Context, templateID string, stepIDs []string) (*TemplateStepsUpdate, error) {
+	if templateID == "" {
+		return nil, errors.New("salesshift.UpdateTemplateSteps: templateID is required")
+	}
+	body := map[string]any{}
+	if len(stepIDs) > 0 {
+		body["step_ids"] = stepIDs
+	}
+	url := transport.JoinURL(c.VxCloudURL, TemplatesPath+"/"+templateID+"/update-steps")
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.UpdateTemplateSteps", "POST", url, body, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateTemplateSteps: %w", err)
+	}
+	var out TemplateStepsUpdate
+	if err := decodeData(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateTemplateSteps: decode: %w", err)
+	}
+	return &out, nil
+}
+
+// TestSendInput is POST /sequences/{id}/test-send.
+//
+// ToEmail defaults to the signed-in user's address. AsContactID merges a real
+// (org-scoped) contact's data instead of sample data; nothing is sent to that
+// contact. ContactID is the older field with the same merge meaning.
+type TestSendInput struct {
+	StepID      string `json:"step_id"`
+	VariantID   string `json:"variant_id,omitempty"`
+	ContactID   string `json:"contact_id,omitempty"`
+	ToEmail     string `json:"to_email,omitempty"`
+	AsContactID string `json:"as_contact_id,omitempty"`
+}
+
+// TestSendResult reports a test send. Subjects arrive prefixed "[TEST] " and
+// the send is never recorded against the sequence.
+type TestSendResult struct {
+	Success    bool   `json:"success"`
+	SentTo     string `json:"sent_to"`
+	Status     string `json:"status"`
+	Provider   string `json:"provider"`
+	TrackingID string `json:"tracking_id"`
+	Error      string `json:"error"`
+}
+
+// TestSendStep sends one step for real to ToEmail (or yourself). Limited to
+// 20 per user per hour; beyond that the server answers 429.
+func (c *Client) TestSendStep(ctx context.Context, sequenceID string, in TestSendInput) (*TestSendResult, error) {
+	if sequenceID == "" || in.StepID == "" {
+		return nil, errors.New("salesshift.TestSendStep: sequenceID and StepID are required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/sequences/"+sequenceID+"/test-send")
+	var raw json.RawMessage
+	if err := c.T.JSON(ctx, "salesshift.TestSendStep", "POST", url, in, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.TestSendStep: %w", err)
+	}
+	// sent_to sits at the top level; decode the whole body first, then let a
+	// data envelope fill anything it carries.
+	var out TestSendResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("salesshift.TestSendStep: decode: %w", err)
+	}
+	if out.SentTo == "" {
+		var inner TestSendResult
+		if err := decodeData(raw, &inner); err == nil && inner.SentTo != "" {
+			out.SentTo = inner.SentTo
+		}
+	}
+	return &out, nil
 }
 
 // CreateSequence adds a sequence, optionally with its steps in one call.
@@ -304,22 +550,26 @@ func (c *Client) EnrollInSequence(ctx context.Context, id string, contactIDs []s
 // decoded as "" on every call and a stopped enrolment looked indistinguishable
 // from a running one.
 type Enrollment struct {
-	ID             string         `json:"id"`
-	SequenceID     string         `json:"sequence_id"`
-	ContactID      string         `json:"contact_id"`
-	ContactName    string         `json:"contact_name"`
-	ContactEmail   string         `json:"contact_email"`
-	ContactCompany string         `json:"contact_company"`
-	Status         string         `json:"status"` // active | paused | completed | stopped
-	CurrentStep    int            `json:"current_step"`
-	NextActionAt   string         `json:"next_action_at"`
-	LastStepAt     string         `json:"last_step_at"`
-	PausedAt       string         `json:"paused_at"`
-	CompletedAt    string         `json:"completed_at"`
-	LastError      string         `json:"last_error"`
-	VariantPicks   map[string]any `json:"variant_picks"`
-	EnrolledAt     string         `json:"enrolled_at"`
-	CreatedAt      string         `json:"created_at"`
+	ID             string `json:"id"`
+	SequenceID     string `json:"sequence_id"`
+	ContactID      string `json:"contact_id"`
+	ContactName    string `json:"contact_name"`
+	ContactEmail   string `json:"contact_email"`
+	ContactCompany string `json:"contact_company"`
+	Status         string `json:"status"` // active | paused | completed | stopped
+	CurrentStep    int    `json:"current_step"`
+	NextActionAt   string `json:"next_action_at"`
+	// NextActionTZ is the IANA zone the window was evaluated in, and
+	// NextActionLocal the same instant as ISO 8601 with that zone's offset.
+	NextActionTZ    string         `json:"next_action_tz"`
+	NextActionLocal string         `json:"next_action_local"`
+	LastStepAt      string         `json:"last_step_at"`
+	PausedAt        string         `json:"paused_at"`
+	CompletedAt     string         `json:"completed_at"`
+	LastError       string         `json:"last_error"`
+	VariantPicks    map[string]any `json:"variant_picks"`
+	EnrolledAt      string         `json:"enrolled_at"`
+	CreatedAt       string         `json:"created_at"`
 }
 
 // EnrollmentFilter narrows the enrollment list. Zero values are omitted, in

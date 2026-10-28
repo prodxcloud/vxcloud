@@ -97,6 +97,7 @@ func (t *Transport) MultipartWithHeaders(
 			targetsNode := t.NodeURL != "" && strings.HasPrefix(req.URL.String(), t.NodeURL)
 			if apiKey != "" && !(bearer != "" && targetsNode) {
 				req.Header.Set("X-API-Key", apiKey)
+				t.setUsername(req)
 			}
 		}
 

@@ -5,6 +5,10 @@ matching `vxsdk` release exactly. Versioning is **CalVer** (`YYYY.M.D`) to
 stay aligned with the vxnode fleet release tags (e.g. `v2026.6.10-1`); the
 0.1.x preview line predates this switch.
 
+## 2026.10.28
+
+- Re-pinned to `vxsdk==2026.10.28` (base + `[async]` extra).
+
 ## 2026.8.28
 
 - Re-pinned to `vxsdk==2026.8.28` (base + `[async]` extra).

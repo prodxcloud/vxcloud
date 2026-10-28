@@ -98,7 +98,6 @@ module is `await`-able and returns typed responses.
 | `c.vxcomputer` | `info`, `health`, `classify`, `run`, `resolveApproval`, `auditVerify` |
 | `c.workflow` | `list/get/create/save/publish/delete`, `validate`, `execute`, `testNode`, `listExecutions`, `cancelExecution`, `export` |
 | `c.vxchrono` | `createGoal/listGoals/updateGoal`, `schedule`, `launchRun`, `pauseRun/resumeRun/stopRun`, `dispatchScheduler` |
-| `c.robotic` | `listRobots/getRobot/registerRobot/sendCommand`, `telemetry`, `plan`, `emergencyStop`, `fleetCommand` |
 | `c.observability` | `backups`, `migrations`, `sync` (backup CRUD, migration plan/execute, batch sync) |
 | `c.billing` | `multicloud`, `optimization` |
 | `c.workspace` | full `/api/v2/setup/*` — workspace + organization lifecycle, cloud/AI provider creds, API tokens, Git/payment/SMTP/SSL/OAuth/OKTA/CyberArk credentials |
@@ -198,7 +197,7 @@ await c.campaigns.send(campaignId);
 const post = await c.social.createPost({ content: 'Shipping vxcli 2026.8.13 today.' });
 const { job } = await c.social.distribute(post.id);
 
-// Fan-out is one goroutine per network in the vxsocial service; `speedup`
+// Fan-out is one goroutine per network in the tenant node's Go engine; `speedup`
 // is a measurement, not a claim.
 console.log(`${job.speedup}x vs sequential (${job.wallMs}ms vs ${job.sequentialMs}ms)`);
 

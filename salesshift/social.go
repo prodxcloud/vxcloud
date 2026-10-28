@@ -2,9 +2,9 @@ package salesshift
 
 // Social distribution and webmaster tooling.
 //
-// The fan-out itself runs in `vxsocial`, a Go service that opens one goroutine
-// per network; this package talks to the FastAPI in front of it, which owns
-// persistence. Every job returns `wall_ms` alongside `sequential_ms` so the
+// The fan-out itself runs in the Go social engine on the tenant node (vxnode,
+// `/api/v2/salesshift/social/*`), one goroutine per network; this package talks
+// to the FastAPI in front of it, which owns persistence. Every job returns `wall_ms` alongside `sequential_ms` so the
 // parallelism is a measurement rather than a claim.
 //
 // Provider calls are SIMULATED unless the deployment holds social API
@@ -40,7 +40,7 @@ type SocialChannel struct {
 }
 
 // ListChannels returns the distribution catalogue. `available` is false when
-// the vxsocial service is unreachable — drafts still save, publishing does not.
+// the node's social engine is unreachable — drafts still save, publishing does not.
 func (c *Client) ListChannels(ctx context.Context) (channels []SocialChannel, simulated, available bool, err error) {
 	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/social/channels")
 	var raw struct {

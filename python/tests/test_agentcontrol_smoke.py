@@ -30,9 +30,9 @@ import vxsdk  # noqa: E402
 
 GO_SHIM = os.environ.get("VXSDK_TEST_GO", "http://localhost:8744")
 FASTAPI = os.environ.get("VXSDK_TEST_FASTAPI", "http://localhost:8741")
-EMAIL   = os.environ.get("VXSDK_TEST_EMAIL", "joelwembo@outlook.com")
-PWD     = os.environ.get("VXSDK_TEST_PASSWORD", "Joelwembo@outlook.comA1")
-TENANT  = os.environ.get("VXSDK_TEST_TENANT", "92efb9b0-6785-468a-80d7-ceb5df400168")
+EMAIL = os.environ.get("VXSDK_TEST_EMAIL", "")
+PWD = os.environ.get("VXSDK_TEST_PASSWORD", "")
+TENANT = os.environ.get("VXSDK_TEST_TENANT", "")
 
 
 def _port_open(url: str) -> bool:

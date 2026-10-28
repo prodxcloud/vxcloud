@@ -24,7 +24,6 @@ import (
 	"github.com/prodxcloud/vxcloud/networks"
 	"github.com/prodxcloud/vxcloud/nodes"
 	"github.com/prodxcloud/vxcloud/observability"
-	"github.com/prodxcloud/vxcloud/robotic"
 	"github.com/prodxcloud/vxcloud/services"
 	"github.com/prodxcloud/vxcloud/salesshift"
 	"github.com/prodxcloud/vxcloud/sessions"
@@ -37,7 +36,7 @@ import (
 )
 
 // Version is the SDK version string. Bumped manually on tag.
-const Version = "2026.8.28"
+const Version = "2026.10.28"
 
 const (
 	defaultVxCloudURL = "https://api.vxcloud.io"
@@ -105,6 +104,13 @@ func New(_ context.Context, opts ...Option) (*Client, error) {
 		// when a Bearer JWT is present (see transport.Transport.NodeURL).
 		NodeURL:      c.nodeURL,
 		RefreshOn401: cl.refresh,
+		// X-Username rides with X-API-Key: required for Vault-issued developer
+		// keys (the vxcli/node key); harmless for users_apikey keys.
+		Username: func() string {
+			cl.mu.RLock()
+			defer cl.mu.RUnlock()
+			return cl.state.User.Username
+		},
 	}
 	return cl, nil
 }
@@ -330,12 +336,6 @@ func (c *Client) Workspace() *workspace.Client {
 // signed approvals, hash-chained audit ledger).
 func (c *Client) VxComputer() *vxcomputer.Client {
 	return &vxcomputer.Client{T: c.t, NodeURL: c.NodeURL(), AuthedUsername: c.Whoami().Username}
-}
-
-// Robotic returns the Robotic control-cloud module — register robots,
-// send commands, push telemetry, request plans, issue fleet commands.
-func (c *Client) Robotic() *robotic.Client {
-	return &robotic.Client{T: c.t, NodeURL: c.NodeURL()}
 }
 
 // VxChrono returns the VxChrono module — the autonomous goal executor and

@@ -12,6 +12,8 @@ package salesshift
 //	POST   /api/v1/salesshift/workflows/{id}/test-run
 //	POST   /api/v1/salesshift/workflows/{id}/enroll
 //	GET    /api/v1/salesshift/workflows/{id}/runs
+//	POST   /api/v1/salesshift/workflows/{id}/run-now
+//	…/workflows/recipes/*  (Recipes — see below)
 
 import (
 	"context"
@@ -323,4 +325,351 @@ func (c *Client) WorkflowRuns(ctx context.Context, id string) ([]WorkflowRun, er
 		return nil, fmt.Errorf("salesshift.WorkflowRuns: %w", err)
 	}
 	return raw.Data, nil
+}
+
+// ---------------------------------------------------------------------------
+// Run now — one set run of an active manual bulk workflow (WP-21/22)
+// ---------------------------------------------------------------------------
+
+// RunNow starts one run (no contact) of an active manual workflow with bulk
+// nodes — a recipe's "Run again". The server answers 409 already_running
+// while a run of the same workflow is live, 409 not_active for a draft, and
+// 400 not_manual for a per-contact workflow (use EnrollContacts there).
+func (c *Client) RunNow(ctx context.Context, id string) (string, error) {
+	if id == "" {
+		return "", errors.New("salesshift.RunNow: id is required")
+	}
+	url := transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/"+id+"/run-now")
+	var raw struct {
+		Data struct {
+			RunID string `json:"run_id"`
+		} `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.RunNow", "POST", url, map[string]any{}, &raw); err != nil {
+		return "", fmt.Errorf("salesshift.RunNow: %w", err)
+	}
+	return raw.Data.RunID, nil
+}
+
+// ---------------------------------------------------------------------------
+// Recipes — /api/v1/salesshift/workflows/recipes (plan §5.5.2)
+//
+//	GET  /workflows/recipes/catalog
+//	GET  /workflows/recipes
+//	POST /workflows/recipes/preview
+//	POST /workflows/recipes                    (draft, or activate:true = launch)
+//	GET  /workflows/recipes/{id}
+//	PUT  /workflows/recipes/{id}
+//	GET  /workflows/recipes/{id}/people
+//	POST /workflows/recipes/{id}/pause|resume|cancel-run|request-approval|approve|decline
+//
+// A recipe is a workflow the SERVER compiles from a form; clients never send
+// a graph. A launch re-runs the preview and refuses on any entry in Blocks
+// (400 with that code), 409 estimate_changed when the audience grew > 20 %,
+// 403 admin_required for members, 422 for countries other than US/CA or a
+// Canadian audience without the CASL acknowledgement.
+// ---------------------------------------------------------------------------
+
+// RecipeCatalogEntry is one card in the recipe gallery.
+type RecipeCatalogEntry struct {
+	Key               string   `json:"key"`
+	Name              string   `json:"name"`
+	Category          string   `json:"category"`
+	Description       string   `json:"description"`
+	Steps             []string `json:"steps"`
+	UsesReveals       bool     `json:"uses_reveals"`
+	Trigger           string   `json:"trigger"`
+	Available         bool     `json:"available"`
+	UnavailableReason string   `json:"unavailable_reason"`
+}
+
+// RecipeAudience is who a recipe emails. Source "lead_pool" uses the pool
+// filters (Countries required, US/CA; Cities exact), "list" uses ListIDs,
+// "contacts" uses the contact filters (cities, countries, tags,
+// lifecycle_stage, exclude_lifecycle_stages, last_emailed_before_days).
+type RecipeAudience struct {
+	Source           string         `json:"source"`
+	Filters          map[string]any `json:"filters,omitempty"`
+	ListIDs          []string       `json:"list_ids,omitempty"`
+	VerifiedOnly     *bool          `json:"verified_only,omitempty"`
+	VerifyUnverified bool           `json:"verify_unverified,omitempty"`
+	Exclusions       map[string]any `json:"exclusions,omitempty"`
+	MaxMembers       int            `json:"max_members"`
+}
+
+// RecipeMessage is the email. TemplateID is org-scoped; Override lets Subject
+// and BodyHTML replace the template's.
+type RecipeMessage struct {
+	TemplateID string `json:"template_id,omitempty"`
+	Subject    string `json:"subject"`
+	BodyHTML   string `json:"body_html"`
+	Override   bool   `json:"override"`
+}
+
+// RecipeSender picks the sending mailbox or integration (ids only).
+type RecipeSender struct {
+	SenderIntegrationID string `json:"sender_integration_id,omitempty"`
+	SenderAccountID     string `json:"sender_account_id,omitempty"`
+	FromName            string `json:"from_name,omitempty"`
+	FromEmail           string `json:"from_email,omitempty"`
+	ReplyTo             string `json:"reply_to,omitempty"`
+}
+
+// RecipeConfirm is what the human confirmed: the policy box, the numbers they
+// saw in the preview, and the typed word ("SEND") above 200 recipients.
+type RecipeConfirm struct {
+	AcceptedPolicy     bool   `json:"accepted_policy"`
+	RevealsMax         int    `json:"reveals_max"`
+	RecipientsEstimate int    `json:"recipients_estimate"`
+	Typed              string `json:"typed,omitempty"`
+}
+
+// RecipeInput is the preview / create / update body.
+type RecipeInput struct {
+	RecipeKey      string         `json:"recipe_key"`
+	Name           string         `json:"name,omitempty"`
+	Audience       RecipeAudience `json:"audience"`
+	Message        RecipeMessage  `json:"message"`
+	Sender         RecipeSender   `json:"sender"`
+	Timing         map[string]any `json:"timing,omitempty"`
+	Limits         map[string]any `json:"limits,omitempty"`
+	Options        map[string]any `json:"options,omitempty"`
+	LawfulBasisAck bool           `json:"lawful_basis_ack,omitempty"`
+	Activate       bool           `json:"activate"`
+	RunNow         bool           `json:"run_now"`
+	Confirm        *RecipeConfirm `json:"confirm,omitempty"`
+}
+
+// RecipePreview is the live count. Blocks lists everything that would refuse
+// a launch (lint, no_sender, no_mailing_address, no_reveals, node_outdated,
+// lawful_basis_required, recipes_disabled, sending_not_entitled).
+type RecipePreview struct {
+	Matched        int              `json:"matched"`
+	Estimated      bool             `json:"estimated"`
+	Sampled        int              `json:"sampled"`
+	Excluded       map[string]int   `json:"excluded"`
+	WillReceive    int              `json:"will_receive"`
+	Sample         []map[string]any `json:"sample"`
+	Reveals        map[string]any   `json:"reveals"`
+	Sending        map[string]any   `json:"sending"`
+	Lint           map[string]any   `json:"lint"`
+	Engine         string           `json:"engine"`
+	CapabilitiesOK *bool            `json:"capabilities_ok"`
+	CanLaunch      bool             `json:"can_launch"`
+	Blocks         []string         `json:"blocks"`
+}
+
+// RecipeSaveResult is what create / update / approve return.
+type RecipeSaveResult struct {
+	Workflow Workflow `json:"workflow"`
+	RunID    string   `json:"run_id"`
+	Status   string   `json:"status"` // draft | running | scheduled | awaiting_approval
+}
+
+// Recipe is the detail page: the workflow, its form, the current run's
+// stages, the audience counts, the campaign and the tracking results.
+type Recipe struct {
+	Workflow     Workflow         `json:"workflow"`
+	RecipeKey    string           `json:"recipe_key"`
+	RecipeConfig map[string]any   `json:"recipe_config"`
+	Approval     map[string]any   `json:"approval"`
+	CurrentRun   map[string]any   `json:"current_run"`
+	Audience     map[string]any   `json:"audience"`
+	Campaign     map[string]any   `json:"campaign"`
+	Tracking     map[string]int   `json:"tracking"`
+	RunsRecent   []map[string]any `json:"runs_recent"`
+}
+
+// RecipeListItem is one row of the recipes table.
+type RecipeListItem struct {
+	Workflow      Workflow       `json:"workflow"`
+	RecipeKey     string         `json:"recipe_key"`
+	AudienceLabel string         `json:"audience_label"`
+	LastRun       map[string]any `json:"last_run"`
+	Campaign      map[string]any `json:"campaign"`
+}
+
+// RecipePerson is one audience member; Email is masked unless the person is
+// already one of the workspace's contacts.
+type RecipePerson struct {
+	DisplayName  string `json:"display_name"`
+	CompanyName  string `json:"company_name"`
+	Email        string `json:"email"`
+	VerifyStatus string `json:"verify_status"`
+	State        string `json:"state"`
+	Reason       string `json:"reason"`
+	SentAt       string `json:"sent_at"`
+}
+
+func (c *Client) recipesURL(path string) string {
+	return transport.JoinURL(c.VxCloudURL, "/api/v1/salesshift/workflows/recipes"+path)
+}
+
+// RecipeCatalog lists the recipes this workspace can start.
+func (c *Client) RecipeCatalog(ctx context.Context) ([]RecipeCatalogEntry, error) {
+	var raw struct {
+		Data []RecipeCatalogEntry `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.RecipeCatalog", "GET", c.recipesURL("/catalog"), nil, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.RecipeCatalog: %w", err)
+	}
+	return raw.Data, nil
+}
+
+// ListRecipes returns the workspace's recipes, optionally filtered by status.
+func (c *Client) ListRecipes(ctx context.Context, status string) ([]RecipeListItem, error) {
+	url := c.recipesURL("")
+	if status != "" {
+		url += "?" + neturl.Values{"status": {status}}.Encode()
+	}
+	var raw struct {
+		Data []RecipeListItem `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.ListRecipes", "GET", url, nil, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.ListRecipes: %w", err)
+	}
+	return raw.Data, nil
+}
+
+// PreviewRecipe counts who would get the email. Read-only; nothing is saved.
+func (c *Client) PreviewRecipe(ctx context.Context, in RecipeInput) (*RecipePreview, error) {
+	if in.RecipeKey == "" {
+		return nil, errors.New("salesshift.PreviewRecipe: RecipeKey is required")
+	}
+	var raw struct {
+		Data RecipePreview `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.PreviewRecipe", "POST", c.recipesURL("/preview"), in, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.PreviewRecipe: %w", err)
+	}
+	return &raw.Data, nil
+}
+
+// CreateRecipe saves a draft (Activate false) or launches (Activate true,
+// with Confirm filled from a preview the caller showed to a human).
+func (c *Client) CreateRecipe(ctx context.Context, in RecipeInput) (*RecipeSaveResult, error) {
+	if in.RecipeKey == "" {
+		return nil, errors.New("salesshift.CreateRecipe: RecipeKey is required")
+	}
+	var raw struct {
+		Data RecipeSaveResult `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.CreateRecipe", "POST", c.recipesURL(""), in, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.CreateRecipe: %w", err)
+	}
+	return &raw.Data, nil
+}
+
+// UpdateRecipe saves a draft or launches an existing one (409 run_live while
+// a run is in flight, 409 edited_on_canvas once it was edited on the canvas).
+func (c *Client) UpdateRecipe(ctx context.Context, id string, in RecipeInput) (*RecipeSaveResult, error) {
+	if id == "" {
+		return nil, errors.New("salesshift.UpdateRecipe: id is required")
+	}
+	var raw struct {
+		Data RecipeSaveResult `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.UpdateRecipe", "PUT", c.recipesURL("/"+id), in, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.UpdateRecipe: %w", err)
+	}
+	return &raw.Data, nil
+}
+
+// GetRecipe fetches the detail page's data.
+func (c *Client) GetRecipe(ctx context.Context, id string) (*Recipe, error) {
+	if id == "" {
+		return nil, errors.New("salesshift.GetRecipe: id is required")
+	}
+	var raw struct {
+		Data Recipe `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.GetRecipe", "GET", c.recipesURL("/"+id), nil, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.GetRecipe: %w", err)
+	}
+	return &raw.Data, nil
+}
+
+// RecipePeople pages through the latest run's audience. state is a member
+// state or one of the People tabs (sent, not_sent, excluded); cursor is the
+// previous page's NextCursor.
+func (c *Client) RecipePeople(ctx context.Context, id, state, q, cursor string, limit int) ([]RecipePerson, string, error) {
+	if id == "" {
+		return nil, "", errors.New("salesshift.RecipePeople: id is required")
+	}
+	v := neturl.Values{}
+	if state != "" {
+		v.Set("state", state)
+	}
+	if q != "" {
+		v.Set("q", q)
+	}
+	if cursor != "" {
+		v.Set("cursor", cursor)
+	}
+	if limit > 0 {
+		v.Set("limit", fmt.Sprint(limit))
+	}
+	url := c.recipesURL("/" + id + "/people")
+	if len(v) > 0 {
+		url += "?" + v.Encode()
+	}
+	var raw struct {
+		Data       []RecipePerson `json:"data"`
+		NextCursor string         `json:"next_cursor"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.RecipePeople", "GET", url, nil, &raw); err != nil {
+		return nil, "", fmt.Errorf("salesshift.RecipePeople: %w", err)
+	}
+	return raw.Data, raw.NextCursor, nil
+}
+
+func (c *Client) recipeAction(ctx context.Context, op, id, action string, body any) (map[string]any, error) {
+	if id == "" {
+		return nil, fmt.Errorf("salesshift.%s: id is required", op)
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	var raw struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := c.T.JSON(ctx, "salesshift."+op, "POST", c.recipesURL("/"+id+"/"+action), body, &raw); err != nil {
+		return nil, fmt.Errorf("salesshift.%s: %w", op, err)
+	}
+	return raw.Data, nil
+}
+
+// PauseRecipe pauses the recipe: live jobs stop, a scheduled campaign is held,
+// a sending one stops before its next recipient.
+func (c *Client) PauseRecipe(ctx context.Context, id string) (map[string]any, error) {
+	return c.recipeAction(ctx, "PauseRecipe", id, "pause", nil)
+}
+
+// ResumeRecipe resumes it; after a bounce stop pass confirm "RESUME".
+func (c *Client) ResumeRecipe(ctx context.Context, id, confirm string) (map[string]any, error) {
+	body := map[string]any{}
+	if confirm != "" {
+		body["confirm"] = confirm
+	}
+	return c.recipeAction(ctx, "ResumeRecipe", id, "resume", body)
+}
+
+// CancelRecipeRun stops a run for good; contacts already added are kept.
+func (c *Client) CancelRecipeRun(ctx context.Context, id, runID string) (map[string]any, error) {
+	return c.recipeAction(ctx, "CancelRecipeRun", id, "cancel-run", map[string]any{"run_id": runID})
+}
+
+// RequestRecipeApproval asks the workspace's admins to launch a saved draft.
+func (c *Client) RequestRecipeApproval(ctx context.Context, id string, confirm *RecipeConfirm) (map[string]any, error) {
+	return c.recipeAction(ctx, "RequestRecipeApproval", id, "request-approval", map[string]any{"confirm": confirm})
+}
+
+// ApproveRecipe launches a recipe a member asked for (admins).
+func (c *Client) ApproveRecipe(ctx context.Context, id string, confirm RecipeConfirm) (map[string]any, error) {
+	return c.recipeAction(ctx, "ApproveRecipe", id, "approve", map[string]any{"confirm": confirm})
+}
+
+// DeclineRecipe sends a requested recipe back to draft (admins).
+func (c *Client) DeclineRecipe(ctx context.Context, id, reason string) (map[string]any, error) {
+	return c.recipeAction(ctx, "DeclineRecipe", id, "decline", map[string]any{"reason": reason})
 }

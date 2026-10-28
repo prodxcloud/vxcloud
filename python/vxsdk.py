@@ -51,7 +51,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-__version__ = "2026.8.28"
+__version__ = "2026.10.28"
 
 DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io"
 DEFAULT_TIMEOUT = 30
@@ -3511,7 +3511,7 @@ class AgentControl(_Resource):
         )
 
 
-# ── VXCOMPUTER / Robotic / VxChrono (local control-plane services) ──────
+# ── VXCOMPUTER / VxChrono (local control-plane services) ──────
 
 class VxComputer(_Resource):
     """VXCOMPUTER — the node-local policy-governed agent runtime.
@@ -3565,107 +3565,6 @@ class VxComputer(_Resource):
         return self.client._json(
             "GET", self.client.node_url + "/api/v2/vxcomputer/audit/verify",
             op="vxcomputer.audit_verify")
-
-
-class Robotic(_Resource):
-    """Robotic control cloud — mirrors /api/v2/robotic/*."""
-
-    def info(self) -> dict[str, Any]:
-        return self.client._json("GET", self.client.node_url + "/api/v2/robotic/info",
-                                  op="robotic.info")
-
-    def list(self) -> dict[str, Any]:
-        return self.client._json("GET", self.client.node_url + "/api/v2/robotic/robots",
-                                  op="robotic.list")
-
-    def register(self, spec: dict[str, Any]) -> dict[str, Any]:
-        return self.client._json("POST", self.client.node_url + "/api/v2/robotic/robots",
-                                  op="robotic.register", json_body=spec)
-
-    def get(self, robot_id: str) -> dict[str, Any]:
-        return self.client._json(
-            "GET", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}",
-            op="robotic.get")
-
-    def delete(self, robot_id: str) -> dict[str, Any]:
-        return self.client._json(
-            "DELETE", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}",
-            op="robotic.delete")
-
-    def command(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/command",
-            op="robotic.command", json_body=payload)
-
-    def command_status(self, command_id: str) -> dict[str, Any]:
-        return self.client._json(
-            "GET", self.client.node_url + f"/api/v2/robotic/commands/{command_id}",
-            op="robotic.command_status")
-
-    def emergency_stop(self, robot_id: str) -> dict[str, Any]:
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/emergency-stop",
-            op="robotic.emergency_stop", json_body={})
-
-    def telemetry(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/telemetry",
-            op="robotic.telemetry", json_body=payload)
-
-    def resolve_approval(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/approval/resolve",
-            op="robotic.resolve_approval", json_body=payload)
-
-    def plan(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Autonomous LLM mission plan (payload: objective, execute, provider, model)."""
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/plan",
-            op="robotic.plan", json_body=payload)
-
-    def schedule(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Schedule a recurring mission via vxchrono (payload: objective, schedule_type, cadence_minutes|cron_expr)."""
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/schedule",
-            op="robotic.schedule", json_body=payload)
-
-    def templates(self) -> dict[str, Any]:
-        """List built-in robot archetypes (arm, mobile, humanoid, drone, computer)."""
-        return self.client._json(
-            "GET", self.client.node_url + "/api/v2/robotic/templates",
-            op="robotic.templates")
-
-    def state(self, robot_id: str) -> dict[str, Any]:
-        """Live offline-physics state (pose, joints, battery, balance) for a robot."""
-        return self.client._json(
-            "GET", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/state",
-            op="robotic.state")
-
-    def simulate(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """DRY-RUN a motion through the physics engine; returns the predicted
-        trajectory and changes no state (payload: action, parameters, samples, type)."""
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/simulate",
-            op="robotic.simulate", json_body=payload)
-
-    def kinematics(self, robot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Forward (op=fk) or inverse (op=ik) kinematics for a 2-link arm
-        (payload: op, joints|x,y, link1_m, link2_m, elbow_up)."""
-        return self.client._json(
-            "POST", self.client.node_url + f"/api/v2/robotic/robots/{robot_id}/kinematics",
-            op="robotic.kinematics", json_body=payload)
-
-    def fleet_command(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.client._json(
-            "POST", self.client.node_url + "/api/v2/robotic/fleet/command",
-            op="robotic.fleet_command", json_body=payload)
-
-    def fleet_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Multi-robot mission via the workflow engine + per-robot LLM plan
-        (payload: objective, robot_ids|robot_type|tags)."""
-        return self.client._json(
-            "POST", self.client.node_url + "/api/v2/robotic/fleet/mission",
-            op="robotic.fleet_mission", json_body=payload)
 
 
 class VxChrono(_Resource):
@@ -4150,6 +4049,63 @@ class SalesShift(_Resource):
             "GET", self.client.node_url + "/api/v2/salesshift/email/health",
             op="salesshift.get_worker_health",
         )
+
+    # ── Lead Verifier ──
+    #
+    # Explainable, on-demand verification of ANY address (the workspace's own
+    # verification desk). Each check runs syntax, domain, MX, provider,
+    # disposable/role, SPF/DMARC, a live SMTP dialogue that stops at RCPT TO —
+    # no message is ever created — and a catch-all canary. Metered by the
+    # server: 12 checks per user per minute, 150 per workspace per hour; a
+    # refusal raises VxRateLimitError whose message names the full window.
+    # Batch callers should space checks ~5.1 s apart.
+
+    VERIFIER_PER_USER_PER_MINUTE = 12
+    VERIFIER_PER_WORKSPACE_PER_HOUR = 150
+
+    def verify_email(self, email: str, *, timeout: int = 60) -> dict[str, Any]:
+        """Verify one address and return the full report.
+
+        Keys: ``email, normalized, domain, provider{name,kind,mx},
+        free_provider, role, disposable, catch_all, auth{spf,dmarc},
+        smtp{host,ms,via,egress_ip}, status, detail, verdict, score, grade,
+        headline, reasons[], steps[{key,label,status,summary,facts[{k,v}],ms}],
+        duration_ms, checked_at``.
+
+        ``verdict`` is ``verified`` | ``risky`` | ``not_verified`` |
+        ``inconclusive``; ``score`` is 0-100 and ``grade`` A-F. Inconclusive
+        means the mail server would not answer — unproven, not good. Takes
+        2-20 s, hence the longer default ``timeout``.
+        """
+        email = (email or "").strip()
+        if not email:
+            raise VxValidationError("salesshift.verify_email", "email is required")
+        body = self.client._json(
+            "POST", self.client.vxcloud_url + "/api/v1/salesshift/verifier/check",
+            op="salesshift.verify_email", json_body={"email": email},
+            target="vxcloud", timeout=timeout,
+        )
+        report = body.get("data")
+        if not isinstance(report, dict):
+            raise VxError("salesshift.verify_email", "the server answered without a report")
+        return report
+
+    def verifier_status(self, *, timeout: int = 60) -> dict[str, Any]:
+        """Can the verification engine give real answers right now?
+
+        Returns ``{probe_from, egress, healthy, checks:[{key,label,ok,detail,
+        ms,blocked}], checked_at, limits:{per_user_per_minute,
+        per_workspace_per_hour}, cached}``. ``healthy`` False means addresses
+        at the failing provider will come back ``inconclusive``. Cached 60 s
+        server-side; a fresh run takes up to ~15 s.
+        """
+        body = self.client._json(
+            "GET", self.client.vxcloud_url + "/api/v1/salesshift/verifier/status",
+            op="salesshift.verifier_status", target="vxcloud", timeout=timeout,
+        )
+        data = dict(body.get("data") or {})
+        data["cached"] = bool(body.get("cached"))
+        return data
 
     # ── leads: transport ──
 
@@ -5625,7 +5581,6 @@ class Client:
         self.workspace = Workspace(self)
         self.agentcontrol = AgentControl(self)
         self.vxcomputer = VxComputer(self)
-        self.robotic = Robotic(self)
         self.vxchrono = VxChrono(self)
         self.workflow = Workflow(self)
 
@@ -5779,6 +5734,10 @@ class Client:
         targets_node = bool(self.node_url) and url.startswith(self.node_url)
         if api_key and not (access_token and targets_node):
             h["X-API-Key"] = api_key
+            # A Vault-issued developer key (the vxcli / node key) is accepted
+            # only together with the username it belongs to.
+            if self.username:
+                h["X-Username"] = self.username
         return h
 
     def _refresh(self) -> None:

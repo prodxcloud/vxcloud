@@ -29,19 +29,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import vxsdk
 
-API_KEY = "xc_dev_sRlbQPC8pkP924m1_Xbg1Dpn0kHNMTau-nyNuwCEiXAehBu7NQyJoQ"
-USERNAME = "joelwembo"  # platform username (NOT the login email)
+API_KEY = os.environ.get("VXSDK_TEST_API_KEY", "")
+USERNAME = os.environ.get("VXSDK_TEST_USERNAME", "")  # platform username (NOT the login email)
 
 # Testing-ground VMs (keypair lives in the workspace vault as "VPS1").
 VMS = [
-    {"host": "139.99.99.155", "ssh_user": "ubuntu", "key_pair_name": "VPS1"},
-    {"host": "34.143.175.212", "ssh_user": "root", "key_pair_name": "VPS1"},
-    {"host": "136.110.49.202", "ssh_user": "root", "key_pair_name": "VPS1"},
-]
+    {"host": h, "ssh_user": u, "key_pair_name": k}
+    for h, u, k in (spec.split(":") for spec in os.environ.get("VXSDK_TEST_VMS", "").split(";") if spec)
+]  # VXSDK_TEST_VMS="host:ssh_user:key_pair_name;..."
 
 SECRET_KEYS = {"database_password", "postgres_password"}
 SECRET_HEADERS = {"authorization", "x-api-key"}
@@ -169,7 +169,7 @@ def main() -> int:
             res = client.metaldb.provision(
                 vm["host"], vm["ssh_user"], vm["key_pair_name"],
                 database_name="appdb", database_user="appuser",
-                database_password="Joelwembo2026!", postgres_password="Joelwembo2026!",
+                database_password=os.environ.get("VXSDK_TEST_DB_PASSWORD", ""), postgres_password=os.environ.get("VXSDK_TEST_DB_PASSWORD", ""),
                 postgres_version="16",
             )
             print("  RESPONSE:")

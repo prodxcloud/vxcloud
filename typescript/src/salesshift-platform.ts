@@ -507,7 +507,7 @@ export class SalesShiftSocial {
   constructor(private t: Transport) {}
 
   /** The catalogue, with each network's real limits. `available` false means
-   *  the vxsocial service is down — drafts save, publishing does not. */
+   *  the node's social engine is down — drafts save, publishing does not. */
   async channels(): Promise<{ channels: SocialChannel[]; simulated: boolean; available: boolean }> {
     const res = await this.t.get<Record<string, unknown>>('/api/v1/salesshift/social/channels');
     const b = res.body ?? {};

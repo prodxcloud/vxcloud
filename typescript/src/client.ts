@@ -31,6 +31,7 @@ import {
 import {
   SalesShiftContacts, SalesShiftWorkflows, SalesShiftSequences,
 } from './salesshift-crm.js';
+import { SalesShiftSettings } from './salesshift-settings.js';
 import { Chat } from './chat.js';
 import { CICD } from './cicd.js';
 import { Cloud } from './cloud.js';
@@ -42,7 +43,6 @@ import { MetalDB } from './metaldb.js';
 import { Networks } from './networks.js';
 import { Nodes } from './nodes.js';
 import { Observability } from './observability.js';
-import { Robotic } from './robotic.js';
 import { Services } from './services.js';
 import { Sessions } from './sessions.js';
 import { VxChrono } from './vxchrono.js';
@@ -54,7 +54,7 @@ import { WebScraper } from './webscraper.js';
 import { AgentCLI } from './agentcli.js';
 import { validateApiKey } from './auth.js';
 
-export const VERSION = '2026.8.28';
+export const VERSION = '2026.10.28';
 
 export interface VxCloudOptions {
   /** API key (xc_dev_*, xc_test_*, xc_live_*). Required unless `accessToken` is set. */
@@ -101,6 +101,9 @@ export class VxCloud {
   readonly opportunities: SalesShiftOpportunities;
   readonly tasks: SalesShiftTasks;
   readonly campaigns: SalesShiftCampaigns;
+  /** Sending settings: email footers (workspace, mailbox, integration) and
+   *  the non-secret integration edit. */
+  readonly salesshiftSettings: SalesShiftSettings;
   readonly chat: Chat;
   readonly cicd: CICD;
   readonly cloud: Cloud;
@@ -115,7 +118,6 @@ export class VxCloud {
   readonly networks: Networks;
   readonly nodes: Nodes;
   readonly observability: Observability;
-  readonly robotic: Robotic;
   readonly services: Services;
   readonly sessions: Sessions;
   readonly vxchrono: VxChrono;
@@ -175,6 +177,7 @@ export class VxCloud {
     this.opportunities = new SalesShiftOpportunities(this.t);
     this.tasks = new SalesShiftTasks(this.t);
     this.campaigns = new SalesShiftCampaigns(this.t);
+    this.salesshiftSettings = new SalesShiftSettings(this.t);
     this.chat = new Chat(this.t);
     this.cicd = new CICD(this.t);
     this.cloud = new Cloud(this.t);
@@ -186,7 +189,6 @@ export class VxCloud {
     this.networks = new Networks(this.t);
     this.nodes = new Nodes(this.t);
     this.observability = new Observability(this.t);
-    this.robotic = new Robotic(this.t);
     this.services = new Services(this.t);
     this.sessions = new Sessions(this.t);
     this.vxchrono = new VxChrono(this.t);

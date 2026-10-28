@@ -57,11 +57,16 @@ export function validateApiKey(key: string): void {
 /**
  * Build the headers attached to every request.
  * `X-API-Key` is always present; `Authorization: Bearer …` is added once
- * the JWT exchange has succeeded.
+ * the JWT exchange has succeeded. `X-Username` rides with the key when a
+ * username is configured: a Vault-issued developer key (the vxcli / node key)
+ * is only accepted together with the username it belongs to.
  */
 export function authHeaders(state: AuthState): Record<string, string> {
   const h: Record<string, string> = {};
-  if (state.apiKey) h['X-API-Key'] = state.apiKey;
+  if (state.apiKey) {
+    h['X-API-Key'] = state.apiKey;
+    if (state.username) h['X-Username'] = state.username;
+  }
   if (state.jwt) h['Authorization'] = `Bearer ${state.jwt}`;
   return h;
 }

@@ -99,7 +99,11 @@ type LeadFilters struct {
 	// executive.
 	Departments []string `json:"departments,omitempty"`
 	// Countries are ISO-2 and upper-cased by the server.
-	Countries  []string `json:"countries,omitempty"`
+	Countries []string `json:"countries,omitempty"`
+	// Cities match EXACTLY (case-insensitive), never as a substring, and need
+	// Countries — the same city name exists in several countries (422
+	// city_needs_country otherwise). LeadCities lists the names that match.
+	Cities     []string `json:"cities,omitempty"`
 	Industries []string `json:"industries,omitempty"`
 	// EmailStatuses: verified, unverified, guessed, catch_all, invalid.
 	EmailStatuses []string `json:"email_statuses,omitempty"`
@@ -916,6 +920,45 @@ func (c *Client) LeadFacets(ctx context.Context, filters LeadFilters) (*LeadFace
 		return nil, fmt.Errorf("salesshift.LeadFacets: %w", err)
 	}
 	return &raw.Data, nil
+}
+
+// LeadCity is one autocomplete row: a city name exactly as Cities matches it,
+// with pool counts (aggregates only — never people).
+type LeadCity struct {
+	City            string `json:"city"`
+	Country         string `json:"country"`
+	PeopleWithEmail int    `json:"people_with_email"`
+	Verified        int    `json:"verified"`
+	Metro           string `json:"metro"`
+}
+
+// LeadMetro is a metro area "Include nearby" expands to: an explicit list of
+// city names (shown to the user, stored on the audience).
+type LeadMetro struct {
+	Key    string   `json:"key"`
+	Label  string   `json:"label"`
+	Cities []string `json:"cities"`
+}
+
+// LeadCities autocompletes city names for one country (q: at least 2
+// characters). GET /leads/cities?country=US&q=san%20f&limit=10.
+func (c *Client) LeadCities(ctx context.Context, country, q string, limit int) ([]LeadCity, []LeadMetro, error) {
+	if country == "" || len(q) < 2 {
+		return nil, nil, errors.New("salesshift.LeadCities: country and q (2+ characters) are required")
+	}
+	v := url.Values{"country": {country}, "q": {q}}
+	if limit > 0 {
+		v.Set("limit", fmt.Sprint(limit))
+	}
+	var raw struct {
+		Data   []LeadCity  `json:"data"`
+		Metros []LeadMetro `json:"metros"`
+	}
+	if err := c.T.JSON(ctx, "salesshift.LeadCities", "GET",
+		c.leadsURL("/leads/cities?"+v.Encode()), nil, &raw); err != nil {
+		return nil, nil, fmt.Errorf("salesshift.LeadCities: %w", err)
+	}
+	return raw.Data, raw.Metros, nil
 }
 
 // ---------------------------------------------------------------------------

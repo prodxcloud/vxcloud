@@ -348,7 +348,6 @@ vxcli salesshift billing cancel --yes
 | `c.vxcomputer.info/run/classify/audit_verify` | GET/POST | `/api/v2/vxcomputer/...` |
 | `c.workflow.list/create/validate/execute/export` | GET/POST | `/api/v2/workflow/...` |
 | `c.vxchrono.create_goal/schedule/launch_run` | POST | `/api/v2/vxchrono/...` |
-| `c.robotic.list_robots/register_robot/send_command` | GET/POST | `/api/v2/robotic/...` |
 | `c.sandboxes.create/list/get/delete/extend/wait_ready` | POST/GET/DELETE | `/api/v2/sandboxes/...` |
 | `c.salesshift.{search_leads,search_all_leads,lead_facets}` | POST | `/api/v1/salesshift/leads/search`, `/facets` |
 | `c.salesshift.{reveal_quota,preview_reveal_cost,reveal_lead}` | GET/POST | `/api/v1/salesshift/leads/{quota,preview-cost,reveal}` |
@@ -362,7 +361,7 @@ vxcli salesshift billing cancel --yes
 | `c.salesshift.{billing_plans,billing_subscription,billing_invoices,billing_checkout}` | GET/POST | `/api/v1/salesshift/billing/...` |
 
 Async parity: `vxsdk_async.AsyncClient` exposes the same modules,
-including `c.vxcomputer`, `c.workflow`, `c.vxchrono`, `c.robotic`, and the
+including `c.vxcomputer`, `c.workflow`, `c.vxchrono`, and the
 full `c.salesshift` surface.
 
 ## Errors

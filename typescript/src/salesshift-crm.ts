@@ -7,6 +7,14 @@
  *   POST                /api/v1/salesshift/workflows/{id}/test-run|enroll
  *   GET/POST            /api/v1/salesshift/sequences
  *   POST                /api/v1/salesshift/sequences/{id}/enroll
+ *   PUT                 /api/v1/salesshift/sequences/{id}
+ *   POST                /api/v1/salesshift/sequences/{id}/test-send
+ *   PUT                 /api/v1/salesshift/steps/{id}
+ *   POST                /api/v1/salesshift/steps/{id}/update-from-template
+ *   GET                 /api/v1/salesshift/campaigns/templates/{id}/usage
+ *   POST                /api/v1/salesshift/campaigns/templates/{id}/update-steps
+ *   POST                /api/v1/salesshift/lists/{id}/members[/remove]
+ *   POST                /api/v1/salesshift/contacts/bulk | bulk-update
  *
  * The distinction that runs through all three: a *lead* is a masked pool
  * snapshot and cannot be mailed; a *contact* owns its address. Every send
@@ -34,7 +42,10 @@ export interface Contact {
   seniority: string;
   linkedinUrl: string;
   city: string;
+  stateProvince: string;
   country: string;
+  /** IANA zone used for recipient-local sending; '' when unknown. */
+  timezone: string;
   source: string;
   status: string;
   lifecycleStage: string;
@@ -86,6 +97,63 @@ const n = (v: unknown): number => (typeof v === 'number' ? v : 0);
 const list = (v: unknown): Record<string, unknown>[] =>
   Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
 
+/**
+ * Picks contacts for a bulk operation. Set exactly one: `contactIds` (≤1000),
+ * `emails` (≤1000), or `filter` — the GET /contacts query parameters as an
+ * object (e.g. `{ search: 'dental', lifecycle_stage: 'lead' }`), meaning every
+ * matching contact.
+ */
+export interface ContactSelector {
+  contactIds?: string[];
+  emails?: string[];
+  filter?: Record<string, string | number | boolean>;
+}
+
+/** Fields a bulk update may set. Timezone is validated server-side; changing
+ *  the location without one lets the server derive it. */
+export interface ContactBulkFields {
+  companyName?: string;
+  jobTitle?: string;
+  timezone?: string;
+  city?: string;
+  stateProvince?: string;
+  country?: string;
+}
+
+export interface ListMembersResult {
+  success: boolean;
+  /** New memberships created — the meaning `added` always had. */
+  added: number;
+  alreadyInList: number;
+  notFound: number;
+  /** The not-found items, when the server lists them rather than counts. */
+  notFoundItems: unknown[];
+}
+
+export interface ImportResult {
+  success: boolean;
+  created: number;
+  updated: number;
+  skipped: number;
+  addedToList: number;
+}
+
+/** Reads a field the server may send as a count or as the list itself. */
+const countOf = (v: unknown): number => (Array.isArray(v) ? v.length : n(v));
+
+function selectorBody(op: string, sel: ContactSelector): Record<string, unknown> {
+  const set = [sel.contactIds?.length, sel.emails?.length, sel.filter ? 1 : 0].filter(Boolean);
+  if (set.length !== 1) {
+    throw new Error(`salesshift.contacts.${op}: pass exactly one of contactIds, emails or filter`);
+  }
+  if ((sel.contactIds?.length ?? 0) > 1000 || (sel.emails?.length ?? 0) > 1000) {
+    throw new Error(`salesshift.contacts.${op}: at most 1000 ids or emails per call — use filter`);
+  }
+  if (sel.contactIds?.length) return { contact_ids: sel.contactIds };
+  if (sel.emails?.length) return { emails: sel.emails };
+  return { filter: sel.filter };
+}
+
 function toContact(c: Record<string, unknown>): Contact {
   const first = s(c.first_name);
   const last = s(c.last_name);
@@ -103,7 +171,9 @@ function toContact(c: Record<string, unknown>): Contact {
     seniority: s(c.seniority),
     linkedinUrl: s(c.linkedin_url),
     city: s(c.city),
+    stateProvince: s(c.state_province),
     country: s(c.country),
+    timezone: s(c.timezone),
     source: s(c.source),
     status: s(c.status),
     lifecycleStage: s(c.lifecycle_stage),
@@ -295,6 +365,79 @@ export class SalesShiftContacts {
       description: s(l.description),
       memberCount: n(l.member_count),
     }));
+  }
+
+  /** Add contacts to a list by ids, emails or "all matching" a filter.
+   *  Duplicates and unknown addresses are skipped and reported. */
+  async addToList(listId: string, sel: ContactSelector): Promise<ListMembersResult> {
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `/api/v1/salesshift/lists/${listId}/members`,
+      selectorBody('addToList', sel),
+    );
+    const b = res.body ?? {};
+    return {
+      success: b.success !== false,
+      added: n(b.added),
+      alreadyInList: countOf(b.already_in_list),
+      notFound: countOf(b.not_found),
+      notFoundItems: Array.isArray(b.not_found) ? (b.not_found as unknown[]) : [],
+    };
+  }
+
+  /** Take contacts off a list (the contacts are kept). Returns how many
+   *  memberships were removed. */
+  async removeFromList(listId: string, sel: ContactSelector): Promise<{ removed: number }> {
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `/api/v1/salesshift/lists/${listId}/members/remove`,
+      selectorBody('removeFromList', sel),
+    );
+    return { removed: n(res.body?.removed) };
+  }
+
+  /** Set the same fields on many contacts (by ids or filter). */
+  async bulkUpdate(
+    sel: Omit<ContactSelector, 'emails'>,
+    fields: ContactBulkFields,
+  ): Promise<{ updated: number }> {
+    const f: Record<string, unknown> = {};
+    if (fields.companyName !== undefined) f.company_name = fields.companyName;
+    if (fields.jobTitle !== undefined) f.job_title = fields.jobTitle;
+    if (fields.timezone !== undefined) f.timezone = fields.timezone;
+    if (fields.city !== undefined) f.city = fields.city;
+    if (fields.stateProvince !== undefined) f.state_province = fields.stateProvince;
+    if (fields.country !== undefined) f.country = fields.country;
+    if (Object.keys(f).length === 0) {
+      throw new Error('salesshift.contacts.bulkUpdate: no fields to set');
+    }
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      '/api/v1/salesshift/contacts/bulk-update',
+      { ...selectorBody('bulkUpdate', sel), fields: f },
+    );
+    return { updated: n(res.body?.updated) };
+  }
+
+  /**
+   * Bulk import. Each row is a contact object (snake_case keys) with at least
+   * `email`. `upsert` updates existing contacts matched by email — only
+   * non-empty incoming fields overwrite; `listId` adds every imported or
+   * updated contact to that list.
+   */
+  async importContacts(
+    rows: Record<string, unknown>[],
+    opts: { upsert?: boolean; listId?: string } = {},
+  ): Promise<ImportResult> {
+    const body: Record<string, unknown> = { contacts: rows };
+    if (opts.upsert) body.upsert = true;
+    if (opts.listId) body.list_id = opts.listId;
+    const res = await this.t.postJSON<Record<string, unknown>>('/api/v1/salesshift/contacts/bulk', body);
+    const b = res.body ?? {};
+    return {
+      success: b.success !== false,
+      created: n(b.created),
+      updated: n(b.updated),
+      skipped: n(b.skipped),
+      addedToList: n(b.added_to_list),
+    };
   }
 }
 
@@ -570,6 +713,17 @@ export interface SequenceStep {
   delayDays: number;
   delayHours: number;
   isActive: boolean;
+  /** Linked template, if any. */
+  templateId: string | null;
+  templateName: string;
+  /** The template was edited after it was last applied to this step. */
+  templateOutOfDate: boolean;
+}
+
+/** One daily send window, "HH:MM" to "HH:MM". Up to three, non-overlapping. */
+export interface SendWindow {
+  start: string;
+  end: string;
 }
 
 export interface Sequence {
@@ -579,6 +733,10 @@ export interface Sequence {
   status: string;
   stopOnReply: boolean;
   sendDays: string[];
+  sendTimezone: string;
+  /** Windows and send days evaluated in each contact's own timezone. */
+  recipientLocal: boolean;
+  sendWindows: SendWindow[];
   stepsCount: number;
   steps: SequenceStep[];
   enrolled: number;
@@ -617,7 +775,32 @@ export interface Enrollment {
   currentStep: number;
   nextSendAt: string | null;
   stopReason: string;
+  /** The window-adjusted due time (UTC ISO). */
+  nextActionAt: string | null;
+  /** IANA zone the window was evaluated in. */
+  nextActionTz: string | null;
+  /** nextActionAt in that zone, ISO 8601 with offset. */
+  nextActionLocal: string | null;
 }
+
+export interface TemplateUsage {
+  sequenceId: string;
+  sequenceName: string;
+  stepId: string;
+  stepNumber: number;
+  outOfDate: boolean;
+}
+
+export interface TestSendResult {
+  success: boolean;
+  sentTo: string;
+  status: string;
+  error: string | null;
+}
+
+/** Templates are served under the campaigns prefix, and so are their usage
+ *  and update-steps routes. */
+const TEMPLATES_PATH = '/api/v1/salesshift/campaigns/templates';
 
 function toSeqStep(x: Record<string, unknown>): SequenceStep {
   return {
@@ -630,7 +813,14 @@ function toSeqStep(x: Record<string, unknown>): SequenceStep {
     delayDays: n(x.delay_days),
     delayHours: n(x.delay_hours),
     isActive: x.is_active !== false,
+    templateId: (x.template_id as string) ?? null,
+    templateName: s(x.template_name),
+    templateOutOfDate: Boolean(x.template_out_of_date),
   };
+}
+
+function toWindows(v: unknown): SendWindow[] {
+  return list(v).map((w) => ({ start: s(w.start), end: s(w.end) }));
 }
 
 function toSequence(x: Record<string, unknown>): Sequence {
@@ -641,6 +831,9 @@ function toSequence(x: Record<string, unknown>): Sequence {
     status: s(x.status),
     stopOnReply: x.stop_on_reply !== false,
     sendDays: Array.isArray(x.send_days) ? (x.send_days as string[]) : [],
+    sendTimezone: s(x.send_timezone),
+    recipientLocal: Boolean(x.recipient_local),
+    sendWindows: toWindows(x.send_windows),
     stepsCount: n(x.steps_count),
     steps: list(x.steps).map(toSeqStep),
     enrolled: n(x.enrolled),
@@ -809,7 +1002,148 @@ export class SalesShiftSequences {
       currentStep: n(e.current_step),
       nextSendAt: (e.next_send_at as string) ?? null,
       stopReason: s(e.stop_reason),
+      nextActionAt: (e.next_action_at as string) ?? null,
+      nextActionTz: (e.next_action_tz as string) ?? null,
+      nextActionLocal: (e.next_action_local as string) ?? null,
     }));
+  }
+
+  /**
+   * Partial update. `sendTimezone` must be a valid IANA zone (422 otherwise);
+   * `recipientLocal` evaluates the windows and send days in each contact's
+   * zone; `sendWindows` takes up to three non-overlapping daily windows.
+   */
+  async update(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string;
+      sendTimezone?: string;
+      sendDays?: string[];
+      dailyCap?: number;
+      stopOnReply?: boolean;
+      recipientLocal?: boolean;
+      sendWindows?: SendWindow[];
+    },
+  ): Promise<Sequence> {
+    if (patch.sendWindows && patch.sendWindows.length > 3) {
+      throw new Error('salesshift.sequences.update: at most 3 send windows');
+    }
+    const body: Record<string, unknown> = {};
+    if (patch.name !== undefined) body.name = patch.name;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.sendTimezone !== undefined) body.send_timezone = patch.sendTimezone;
+    if (patch.sendDays !== undefined) body.send_days = patch.sendDays;
+    if (patch.dailyCap !== undefined) body.daily_cap = patch.dailyCap;
+    if (patch.stopOnReply !== undefined) body.stop_on_reply = patch.stopOnReply;
+    if (patch.recipientLocal !== undefined) body.recipient_local = patch.recipientLocal;
+    if (patch.sendWindows !== undefined) body.send_windows = patch.sendWindows;
+    const res = await this.t.putJSON<{ data?: Record<string, unknown> }>(
+      `/api/v1/salesshift/sequences/${id}`,
+      body,
+    );
+    return toSequence(res.body?.data ?? (res.body as Record<string, unknown>) ?? {});
+  }
+
+  /**
+   * Edit one step. `templateId` links a template (sent with a subject/body it
+   * also stamps when it was applied); `templateId: null` unlinks.
+   */
+  async updateStep(
+    stepId: string,
+    patch: {
+      name?: string;
+      subject?: string;
+      bodyHtml?: string;
+      delayDays?: number;
+      delayHours?: number;
+      isActive?: boolean;
+      templateId?: string | null;
+    },
+  ): Promise<SequenceStep> {
+    const body: Record<string, unknown> = {};
+    if (patch.name !== undefined) body.name = patch.name;
+    if (patch.subject !== undefined) body.subject = patch.subject;
+    if (patch.bodyHtml !== undefined) body.body_html = patch.bodyHtml;
+    if (patch.delayDays !== undefined) body.delay_days = patch.delayDays;
+    if (patch.delayHours !== undefined) body.delay_hours = patch.delayHours;
+    if (patch.isActive !== undefined) body.is_active = patch.isActive;
+    if (patch.templateId !== undefined) body.template_id = patch.templateId;
+    const res = await this.t.putJSON<{ data?: Record<string, unknown> }>(
+      `/api/v1/salesshift/steps/${stepId}`,
+      body,
+    );
+    return toSeqStep(res.body?.data ?? {});
+  }
+
+  /** Re-copy subject and body from the step's linked template. */
+  async updateStepFromTemplate(stepId: string): Promise<SequenceStep> {
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `/api/v1/salesshift/steps/${stepId}/update-from-template`,
+      {},
+    );
+    const b = res.body ?? {};
+    const d = b.data && typeof b.data === 'object' ? (b.data as Record<string, unknown>) : b;
+    return toSeqStep(d);
+  }
+
+  /** The sequence steps that use a template, and which are out of date. */
+  async templateUsage(templateId: string): Promise<TemplateUsage[]> {
+    const res = await this.t.get<unknown>(`${TEMPLATES_PATH}/${templateId}/usage`);
+    const b = res.body as unknown;
+    const rows = Array.isArray(b) ? b : list((b as Record<string, unknown> | undefined)?.data);
+    return list(rows).map((u) => ({
+      sequenceId: s(u.sequence_id),
+      sequenceName: s(u.sequence_name),
+      stepId: s(u.step_id),
+      stepNumber: n(u.step_number),
+      outOfDate: Boolean(u.out_of_date),
+    }));
+  }
+
+  /** Re-apply a template to its linked steps (all, or just `stepIds`). */
+  async updateTemplateSteps(
+    templateId: string,
+    stepIds?: string[],
+  ): Promise<{ updated: number; sequences: unknown[] }> {
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `${TEMPLATES_PATH}/${templateId}/update-steps`,
+      stepIds && stepIds.length ? { step_ids: stepIds } : {},
+    );
+    const b = res.body ?? {};
+    return {
+      updated: n(b.updated),
+      sequences: Array.isArray(b.sequences) ? (b.sequences as unknown[]) : [],
+    };
+  }
+
+  /**
+   * Send one step for real. `toEmail` defaults to your own address;
+   * `asContactId` merges that contact's data (nothing is sent to them). The
+   * subject is prefixed "[TEST] ", nothing is recorded against the sequence,
+   * and the server allows 20 per user per hour (then 429).
+   */
+  async testSend(
+    sequenceId: string,
+    input: { stepId: string; variantId?: string; toEmail?: string; asContactId?: string },
+  ): Promise<TestSendResult> {
+    const res = await this.t.postJSON<Record<string, unknown>>(
+      `/api/v1/salesshift/sequences/${sequenceId}/test-send`,
+      {
+        step_id: input.stepId,
+        variant_id: input.variantId,
+        to_email: input.toEmail,
+        as_contact_id: input.asContactId,
+      },
+    );
+    const b = res.body ?? {};
+    const d = (b.data && typeof b.data === 'object' ? b.data : {}) as Record<string, unknown>;
+    return {
+      success: b.success !== false,
+      sentTo: s(b.sent_to) || s(d.sent_to),
+      status: s(b.status) || s(d.status),
+      error: (b.error as string) ?? null,
+    };
   }
 
   async analytics(id: string): Promise<Record<string, unknown>> {

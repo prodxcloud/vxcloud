@@ -46,6 +46,12 @@ type Transport struct {
 	// alongside the JWT makes it strict-compare and 403 ("not valid for
 	// this workspace"). Control-plane (VxCloud) requests keep X-API-Key.
 	NodeURL string
+	// Username, if non-nil and non-empty, is sent as X-Username next to
+	// X-API-Key (only when X-API-Key is sent). The VxCloud API accepts a
+	// Vault-issued developer key — the one vxcli and the tenant node use —
+	// only together with the username it belongs to; without it that key
+	// answers 401 "Invalid or expired API key".
+	Username func() string
 	// RefreshOn401, if non-nil, is invoked exactly once per request when a
 	// 401 response is received. On success the request is replayed with the
 	// updated Authorization headers. Use this to wire automatic token
@@ -53,6 +59,18 @@ type Transport struct {
 	RefreshOn401 func(ctx context.Context) error
 	MaxRetries   int           // default 3 if zero
 	BaseDelay    time.Duration // default 200ms if zero
+}
+
+// setUsername adds X-Username next to an X-API-Key header (see Username).
+func (t *Transport) setUsername(req *http.Request) {
+	if t.Username == nil {
+		return
+	}
+	if u := strings.TrimSpace(t.Username()); u != "" {
+		req.Header.Set("X-Username", u)
+	} else {
+		req.Header.Del("X-Username")
+	}
 }
 
 // JSON performs an HTTP request with a JSON body (if body != nil) and
@@ -126,8 +144,10 @@ func (t *Transport) JSONWithHeaders(ctx context.Context, op, method, url string,
 			targetsNode := t.NodeURL != "" && strings.HasPrefix(req.URL.String(), t.NodeURL)
 			if apiKey != "" && !(bearer != "" && targetsNode) {
 				req.Header.Set("X-API-Key", apiKey)
+				t.setUsername(req)
 			} else {
 				req.Header.Del("X-API-Key")
+				req.Header.Del("X-Username")
 			}
 		}
 		resp, err := t.Doer.Do(req)
@@ -279,8 +299,10 @@ func (t *Transport) BytesWithHeaders(ctx context.Context, op, method, url string
 			targetsNode := t.NodeURL != "" && strings.HasPrefix(req.URL.String(), t.NodeURL)
 			if apiKey != "" && !(bearer != "" && targetsNode) {
 				req.Header.Set("X-API-Key", apiKey)
+				t.setUsername(req)
 			} else {
 				req.Header.Del("X-API-Key")
+				req.Header.Del("X-Username")
 			}
 		}
 		resp, err := t.Doer.Do(req)
