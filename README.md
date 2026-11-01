@@ -32,7 +32,7 @@ One wire contract, five first-class SDKs — no vendor lock-in, full multi-cloud
 > `vxcloud` (PyPI) is a brand alias that re-exports `vxsdk` — `import vxcloud` ≡ `import vxsdk`.
 > Source: [github.com/prodxcloud/vxcloud](https://github.com/prodxcloud/vxcloud) · Docs: [vxcloud.io/docs/sdks](https://vxcloud.io/docs/sdks)
 >
-> **Current release: `2026.10.29`.** Go resolves it as `v0.20261029.0` — see
+> **Current release: `2026.11.1`.** Go resolves it as `v0.20261101.0` — see
 > [Install](#install) for why the Go tag looks different. API may still change
 > before v1.0.
 
@@ -57,18 +57,18 @@ pip install "vxsdk[async]"   # + async client (httpx)
 ```bash
 go get github.com/prodxcloud/vxcloud@latest
 # or pin the exact release:
-go get github.com/prodxcloud/vxcloud@v0.20261028.0
+go get github.com/prodxcloud/vxcloud@v0.20261101.0
 ```
 
-> **Why the Go tag reads `v0.20261029.0` and not `2026.10.29`** — they are the
+> **Why the Go tag reads `v0.20261101.0` and not `2026.11.1`** — they are the
 > same release. Go requires module versions to be semver, and it parses a
-> `v`-prefixed CalVer tag as a *major version*: `v2026.10.29` means major 2026,
+> `v`-prefixed CalVer tag as a *major version*: `v2026.11.1` means major 2026,
 > which it rejects unless the module path ends in `/v2026`. So the date is
 > carried in the **minor** field instead, as `YYYYMMDD`:
 >
 > | Release | Go tag |
 > |---|---|
-> | `2026.10.29` | `v0.20261029.0` |
+> | `2026.11.1` | `v0.20261101.0` |
 > | `2026.12.25` | `v0.20261225.0` |
 > | same-day hotfix | `v0.20260828.1` |
 >
@@ -77,7 +77,7 @@ go get github.com/prodxcloud/vxcloud@v0.20261028.0
 > and the patch field leaves room for same-day fixes. `@latest` always resolves
 > to the newest release.
 >
-> `@2026.10.29` and `@v2026.10.29` will **not** resolve, and `v0.2.0` is retracted.
+> `@2026.11.1` and `@v2026.11.1` will **not** resolve, and `v0.2.0` is retracted.
 
 ---
 
@@ -201,6 +201,55 @@ c, _ := vxsdk.New(ctx, vxsdk.WithAPIKey("xc_live_…"))
 
 ---
 
+## Platform architecture and runtime ports
+
+VxCloud is a multi-tenant control plane plus tenant-owned execution nodes.
+The browser, `vxcli` and every SDK exchange a developer key for a scoped JWT;
+workspace, organization and node ownership are checked before a request is
+dispatched. The node runtime is the sealed multi-arch `vxcloud/vxnode` image;
+it provides VxComputer, Docker/Terraform deployment, governed tools, `vxcli`
+and the SalesShift Go email worker.
+
+```text
+Browser / vxcli / SDKs
+        │ auth + workspace scope
+        ▼
+FastAPI :8741 ── Django/admin :8742 (local)
+        ├── Go core :8743 ── billing, nodes, provisioning, workflows
+        ├── node*.vxcloud.click → vxnode/VxComputer :8744
+        ├── VxThinkingLLM :8745 (optional legacy sidecar :8746)
+        ├── Vault :8200 ↔ Consul :8500
+        ├── Redis :6379 (Celery broker/results/cache/pub-sub)
+        ├── Kafka :9092 (+ Zookeeper :2181 where used)
+        ├── Temporal :7233 (long-running workflow history/retries)
+        ├── PostgreSQL :5432
+        └── vxalerts/notifications :8014
+```
+
+Public ingress is normally Nginx/Cloudflare on `80/443`: `vxcloud.io` (web,
+chat, studio, messaging) serves the production frontend on `3000`,
+`api.vxcloud.io` routes to `8741`, `cloud.vxcloud.io` to `8743`, node domains
+to `8744`, and `llm.vxcloud.io` to `8745`. Local development uses
+`vxcloud_web` `3010`, SalesShift `3020`/`3021`, and `vxadmin` `3009` when its
+Vite port is overridden (`5173` is Vite's default). OpenVSCode is fronted at
+`8443` with a node-local backend on `8089`; OpenClaw is `18789`; Ollama is
+`11434`; Celery Flower, Kafka UI and mailcow are operator-only surfaces when
+their optional compose profiles publish `5555`, `8289`, and `8443`.
+
+SalesShift uses the same tenant/audit model for lead enrichment, CRM contacts,
+opportunities, proposals, compose/reply, sequences, campaigns, tasks and
+messaging. Mail and other external actions are approval-gated; a draft is not
+a send. `@nodes <hostname>` targets another node owned by the current
+workspace, while the selected node remains the default. The result should
+include provider/model, node, job/audit ID and delivery or workflow status.
+
+After purchasing a node, the required readiness sequence is: activate billing,
+register the node, **Sync With Workspace**, verify `/api/v2/health` and
+`/api/v2/version`, then test the developer-key exchange. A running container
+without the correct workspace binding is not a ready node.
+
+---
+
 ## What you can do
 
 Every SDK exposes the same resource modules off the client:
@@ -262,7 +311,7 @@ Python and TypeScript expose the same operations with idiomatic naming
 | **Errors** | Typed error hierarchy per language; categories may be added, never removed. |
 | **Retries** | Network / 5xx / rate-limit retried with exponential backoff (default 3). Others surface immediately. |
 | **Wire format** | `snake_case` JSON matching the API verbatim; idiomatic identifiers per language. |
-| **Versioning** | CalVer `YYYY.M.D` (currently `2026.10.29`); the Go module tag encodes the same date as `v0.20261029.0`. v1.0 will guarantee stability across minor releases. |
+| **Versioning** | CalVer `YYYY.M.D` (currently `2026.11.1`); the Go module tag encodes the same date as `v0.20261101.0`. v1.0 will guarantee stability across minor releases. |
 
 ---
 

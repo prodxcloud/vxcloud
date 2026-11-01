@@ -1,3 +1,14 @@
+## [2026.11.1]
+
+- Coordinated the SDK/runtime release for November 1, 2026. `@vxcloud/sdk`,
+  `vxsdk`, the `vxcloud` Python alias, Go, C++ and Java now advertise the same
+  CalVer; the Go module tag is `v0.20261101.0`.
+- Documented the VxCloud + SalesShift architecture, tenant-node routing,
+  `@nodes` selection, VxThinking (`8745`), the control-plane port map and the
+  health-gated node repair sequence.
+- Kept workflow chat approval-gated: planning/streaming may run read-only, but
+  a workflow or external side effect requires an explicit confirmation.
+
 ## [2026.10.29]
 
 - Added conversation history CRUD, SSE agent/workflow streams and Mission Control chat commands to Go and vxcli.
