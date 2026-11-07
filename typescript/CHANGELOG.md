@@ -1,3 +1,9 @@
+## [2026.11.8]
+
+- Version-alignment release for the 2026-11-08 vxnode fleet image.
+- Includes conversation history, streaming agent/workflow chat, explicit
+  workflow confirmation, Mission Control commands, and SalesShift verifier APIs.
+
 ## [2026.10.29]
 
 - Added conversation list/search/paging plus history, save, rename and delete helpers.

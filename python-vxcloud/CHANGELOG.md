@@ -1,3 +1,13 @@
+## [2026.11.8]
+
+- Re-pinned to `vxsdk==2026.11.8` (base + `[async]` extra).
+- Version-alignment release for the 2026-11-08 vxnode fleet image.
+
+## [2026.11.1]
+
+- Re-pinned to `vxsdk==2026.11.1` (base + `[async]` extra).
+- Version-alignment release for the refreshed vxnode fleet image.
+
 ## [2026.10.29]
 
 - Added conversation list/search/paging plus history, save, rename and delete helpers.

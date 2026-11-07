@@ -33,6 +33,8 @@ Same class hierarchy, same method signatures, same auth model. Switching
 is essentially `vxsdk.Client` → `vxsdk_async.AsyncClient` plus
 `async`/`await`.
 
+Current release: `2026.11.8`.
+
 ## Why a parallel Python implementation?
 
 Python and Go don't share runtimes. The Go SDK is the right answer for
@@ -47,7 +49,7 @@ For now, both are hand-written and kept in sync by review.
 
 ```bash
 # PyPI (canonical name)
-pip install vxsdk
+pip install vxsdk==2026.11.8
 pip install vxsdk[async]      # adds httpx for vxsdk_async
 
 # PyPI (brand-name alias — same code, just `import vxcloud`)

@@ -6,6 +6,8 @@
 [![Downloads](https://static.pepy.tech/badge/vxcloud/month)](https://pepy.tech/project/vxcloud)
 [![Wheel](https://img.shields.io/pypi/wheel/vxcloud.svg)](https://pypi.org/project/vxcloud/#files)
 
+Current release: `2026.11.8` (pins `vxsdk==2026.11.8`).
+
 **Provision infrastructure, deploy applications, and manage running services on the [vxcloud](https://vxcloud.io) platform — straight from Python.**
 
 `vxcloud` is the official, brand-name distribution of the vxcloud Python SDK. It re-exports the entire [`vxsdk`](https://pypi.org/project/vxsdk/) surface, so `import vxcloud` and `import vxsdk` are byte-for-byte identical — pick the name your team prefers. The sync client is **stdlib-only** (zero third-party dependencies); an optional async client is one extra away.
@@ -17,7 +19,7 @@
 ## Installation
 
 ```bash
-pip install vxcloud            # sync client — stdlib only, zero dependencies
+pip install vxcloud==2026.11.8 # sync client — stdlib only, zero dependencies
 pip install vxcloud[async]     # adds httpx for the async client
 ```
 

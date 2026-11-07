@@ -1,3 +1,10 @@
+## [2026.11.8]
+
+- Version-alignment release for the 2026-11-08 vxnode fleet image.
+- Publishes the conversation history, streaming agent/workflow chat, explicit
+  workflow confirmation, Mission Control commands, and SalesShift verifier
+  surfaces across the Go, Python, and TypeScript SDKs.
+
 ## [2026.11.1]
 
 - Coordinated the SDK/runtime release for November 1, 2026. `@vxcloud/sdk`,
@@ -8,6 +15,8 @@
   health-gated node repair sequence.
 - Kept workflow chat approval-gated: planning/streaming may run read-only, but
   a workflow or external side effect requires an explicit confirmation.
+- Carries the 2026.10.29 conversation history, streaming agent/workflow chat,
+  explicit workflow confirmation, and Mission Control command helpers.
 
 ## [2026.10.29]
 

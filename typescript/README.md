@@ -12,7 +12,7 @@ The official TypeScript SDK for the vxcloud / VxCloud platform. Fully typed, dua
 
 [Install](#install) · [Quick start](#quick-start) · [What you can do](#what-you-can-do) · [Auth](#authentication) · [Errors](#error-handling) · [Docs](https://vxcloud.io/docs/sdks)
 
-> **Versioning: CalVer (`YYYY.M.D`)** — releases track the vxnode fleet date (e.g. `v2026.6.10-1`), so the SDK, the node binary, and the dashboard all read the same number. Still a preview surface; pin exact versions in production.
+> **Current release: `2026.11.8`.** Versioning is CalVer (`YYYY.M.D`) and tracks the vxnode fleet date. Pin exact versions in production.
 
 ---
 
@@ -20,6 +20,7 @@ The official TypeScript SDK for the vxcloud / VxCloud platform. Fully typed, dua
 
 ```bash
 npm install @vxcloud/sdk
+npm install @vxcloud/sdk@2026.11.8  # pin the current release
 # or
 pnpm add @vxcloud/sdk
 # or
