@@ -336,6 +336,15 @@ cd ../python-vxcloud && python -m build && twine upload dist/*
 Keep all five versions in lock-step. npm publishing requires a 2FA-bypass
 (automation/granular) token; PyPI uses an API token.
 
+## Author
+
+VxCloud SDK is created and maintained by **Joel O. Wembo**.
+
+- Email: [joelwembo@outlook.com](mailto:joelwembo@outlook.com)
+- Website: [vxcloud.io](https://vxcloud.io)
+- LinkedIn: [linkedin.com/in/joelwembo](https://www.linkedin.com/in/joelwembo/)
+- GitHub: [github.com/joelwembo](https://github.com/joelwembo)
+
 ## License
 
 Apache-2.0.
