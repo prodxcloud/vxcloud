@@ -12,7 +12,7 @@
 
 namespace vx {
 
-static const char* kVersion = "2026.11.1";
+static const char* kVersion = "2026.11.8";
 
 // ── VxError ───────────────────────────────────────────────────────────────
 

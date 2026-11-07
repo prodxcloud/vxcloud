@@ -50,7 +50,7 @@ public final class VxClient {
     public static final String DEFAULT_VXCLOUD_URL = "https://api.vxcloud.io";
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
     public static final Duration LONG_TIMEOUT = Duration.ofSeconds(600);
-    private static final String VERSION = "2026.11.1";
+    private static final String VERSION = "2026.11.8";
     /** Page cap for {@code /leads/search}; the server clamps to this too. */
     private static final int LEADS_PAGE_MAX = 100;
     /** Batch cap for {@code /leads/save} and {@code /leads/convert-from-pool}. */
